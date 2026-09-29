@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c171d"><meta name="description" content="Find your next winter round. A fast Christmas and winter Counter-Strike 1.6 server browser.">
+  <title>ChristmasDust — Find your winter server</title>
+  <link rel="stylesheet" href="/style.css"><script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#servers">Skip to servers</a>
+  <div class="snow" aria-hidden="true"></div>
+  <header class="masthead"><a class="brand" href="/">✳ <span>Christmas<span class="accent">Dust</span></span></a><span class="edition">COUNTER-STRIKE 1.6 <span> / </span> WINTER EDITION</span></header>
+  <main>
+    <section class="hero"><div><p class="eyebrow">OLD MAPS. WARM MEMORIES. ONE MORE ROUND.</p><h1>A little snow.<br>A lot of <em>Counter-Strike.</em></h1><p class="intro">Find a Christmas server, bring your friends, and make yourself at home.</p></div><div class="winter-art" aria-hidden="true"><div class="moon"></div><div class="tree tree-one"></div><div class="tree tree-two"></div><span class="art-label">de_dust, but make it December.</span></div></section>
+    <section class="browser" aria-labelledby="browser-title">
+      <div class="browser-heading"><div><p class="eyebrow">YOUR NEXT ROUND STARTS HERE</p><h2 id="browser-title">Winter server browser</h2></div><button id="locate" class="button" type="button">◎ Use my location</button></div>
+      <p id="location-status" class="muted">Country preference is automatic when available. Precise location is optional and stays in your browser.</p>
+      <form id="filters" class="filters" role="search">
+        <label class="search">Search servers<input id="search" type="search" placeholder="Server name, map or IP…" maxlength="200"></label>
+        <label>Country<select id="country"><option value="">All countries</option></select></label>
+        <label>Map<select id="map"><option value="">All maps</option></select></label>
+        <label>Christmas confidence<select id="confidence"><option value="">All matches</option><option value="high">High confidence</option><option value="probable">Probable winter</option><option value="curated">Curated</option></select></label>
+        <label>Sort by<select id="sort"><option value="recommended">Recommended</option><option value="players">Most players</option><option value="proximity">Nearest (use location)</option></select></label>
+        <div class="toggles"><label><input type="checkbox" id="slots"> Open slots only</label><label><input type="checkbox" id="favorites"> ★ Favorites</label><label><input type="checkbox" id="online"> Online only</label></div>
+      </form>
+      <div class="list-heading"><span id="count">Finding your next server…</span><span>Automatic updates · 30s</span></div>
+      <p id="status" class="notice" role="status">Loading the latest server snapshot…</p>
+      <div id="servers" tabindex="-1"></div>
+      <noscript><p class="notice">Enable JavaScript to browse servers. The read-only snapshot is also available at <a href="/api/servers">/api/servers</a>.</p></noscript>
+      <p class="fineprint">Christmas matches are based on server names and maps, or operator curation. Distance is approximate; your in-game ping can differ. Steam and Counter-Strike 1.6 are required to connect.</p>
+    </section>
+  </main>
+  <footer><span>✳ ChristmasDust <span id="version"></span> · Made for one more round.</span><span>Location data, when enabled: <a href="https://www.maxmind.com">MaxMind GeoLite2</a>. Not affiliated with Valve.</span></footer>
+  <dialog id="copy-dialog"><h2>Copy this console command</h2><input id="copy-value" readonly aria-label="Console command"><form method="dialog"><button class="button">Close</button></form></dialog>
+  <div id="toast" role="status" class="toast" hidden></div>
+</body>
+</html>

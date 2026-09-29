@@ -1,0 +1,22 @@
+{
+  "name": "christmasdust",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --test --test-isolation=none",
+    "check": "node scripts/check.js",
+    "dev": "node --watch --env-file-if-exists=.env src/index.js"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "gamedig": "5.3.3",
+    "helmet": "8.3.0",
+    "maxmind": "5.0.7",
+    "proxy-addr": "2.0.8"
+  }
+}
