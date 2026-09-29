@@ -6,7 +6,14 @@ import { classify } from '../src/domain/classify.js';
 import { mapLimit } from '../src/utils/concurrency.js';
 import { haversine, rankServers } from '../public/js/ranking.js';
 import { element, connection } from '../public/js/render.js';
+import { metadata } from '../src/domain/server.js';
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
+test('Steam and GameDig player capacities keep their source field shapes', () => {
+  const { players, maxPlayers } = metadata({ players: 12, max_players: 32 });
+  assert.deepEqual({ players, maxPlayers }, { players: 12, maxPlayers: 32 });
+  assert.equal(metadata({ numplayers: 4, maxplayers: 16 }).maxPlayers, 16);
+  assert.equal(metadata({ numplayers: 4, maxPlayers: 24 }).maxPlayers, 24);
+});
 test('configuration defaults and strict validation', () => {
   assert.equal(readConfig({}).liveInterval, 45000);
   for (const env of [{ PORT: '30oops' }, { PORT: '' }, { NODE_ENV: 'prod' }, { QUERY_CONCURRENCY: '0' }, { DISCOVERY_MODE: 'steam' }, { ADMIN_TOKEN: 'short' }, { TRUST_CF_COUNTRY: 'yes' }, { TRUST_CF_COUNTRY: 'true' }, { TRUSTED_PROXIES: 'true' }, { TRUSTED_PROXIES: '1.1.1.1/33' }, { HOST: 'localhost' }, { STEAM_API_KEY: 'oops' }, { STALE_AFTER_MS: '10000' }]) assert.throws(() => readConfig(env));
@@ -14,7 +21,7 @@ test('configuration defaults and strict validation', () => {
 });
 test('address normalization, invalid endpoints and private network denial', () => {
   assert.deepEqual(parseAddress('8.8.8.8:00080'), { id: '8.8.8.8:80', ip: '8.8.8.8', port: 80 });
-  for (const value of ['localhost:27015', '[::1]:27015', '127.0.0.1:27015', '10.1.1.1:2', '169.254.169.254:80', '100.64.1.1:80', '192.168.1.1:2', '172.31.1.1:2', '0.0.0.0:2', '224.0.0.1:2', '8.8.8.8:0', '8.8.8.8:65536', '8.8.8.8:80/path', '8.8.8.8:80\n', '008.8.8.8:80']) assert.throws(() => parseAddress(value), value);
+  for (const value of ['localhost:27015', '[::1]:27015', '127.0.0.1:27015', '10.1.1.1:2', '169.254.169.254:80', '100.64.1.1:80', '192.168.1.1:2', '172.31.1.1:2', '0.0.0.0:2', '224.0.0.1:2', '240.0.0.1:27015', '8.8.8.8:0', '8.8.8.8:65536', '8.8.8.8:80/path', '8.8.8.8:80\n', '008.8.8.8:80']) assert.throws(() => parseAddress(value), value);
 });
 test('explainable multilingual confidence and curation', () => {
   for (const name of ['Christmas', 'XMAS', 'Święta', 'Noël', 'Weihnachten']) assert.equal(classify({ name }, rules).confidence, 'high');

@@ -9,7 +9,7 @@ async function main() {
   const config = readConfig();
   const rules = await loadDetection(config.detectionPath);
   const geoip = await loadGeoip(config.geoipPath);
-  const monitor = new Monitor({ config, rules, geoip, discover: steamDiscovery(config), query: gameQuery(config), store: new SnapshotStore(config.snapshotPath) });
+  const monitor = new Monitor({ config, rules, geoip, discover: steamDiscovery(config, rules), query: gameQuery(config), store: new SnapshotStore(config.snapshotPath) });
   await monitor.init();
   const app = createApp({ config, monitor, geoip });
   const server = app.listen(config.port, config.host, () => {

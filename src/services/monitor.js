@@ -1,5 +1,5 @@
 import { classify } from '../domain/classify.js';
-import { metadata } from '../domain/server.js';
+import { metadata, cleanText } from '../domain/server.js';
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
 export class Monitor {
@@ -18,22 +18,38 @@ export class Monitor {
     this.prune();
     this.ready = true;
   }
+  themeObservation(raw, previous, curated) {
+    const classification = classify(raw, this.rules, curated);
+    if (classification.confidence !== 'none') return { classification, themeMisses: 0, lastThemeMatchAt: this.now(), retire: false };
+    if (!previous) return { retire: true };
+    // Empty/incomplete responses and query failures are not evidence of a theme change.
+    if (!cleanText(raw.name).trim() || !cleanText(raw.map).trim()) {
+      return { classification: previous.classification, themeMisses: previous.themeMisses || 0,
+        lastThemeMatchAt: previous.lastThemeMatchAt, retire: false };
+    }
+    const themeMisses = (previous.themeMisses || 0) + 1;
+    return { classification, themeMisses,
+      lastThemeMatchAt: previous.lastThemeMatchAt ?? Math.max(previous.lastSeenAt || 0, previous.discoveredAt || 0),
+      retire: themeMisses >= 2 };
+  }
   add(raw, curated = false) {
     const address = parseAddress(raw.id);
     if (this.rules.exclude.has(address.id)) return;
     const previous = this.servers.get(address.id);
-    const classification = classify(raw, this.rules, curated);
-    if (classification.confidence === 'none' && !previous) return;
+    const { retire, ...theme } = this.themeObservation(raw, previous, curated);
+    if (retire) { this.servers.delete(address.id); return; }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
     // Discovery metadata must not overwrite a trustworthy live response.
     this.servers.set(address.id, { ...metadata(raw), ...address, ...this.geoip(address.ip), status: 'unknown', misses: 0,
-      lastSeenAt: null, lastQueryAt: null, ...previous, classification: previous && !curated ? previous.classification : classification,
-      discoveredAt: this.now(), curated });
+      lastSeenAt: null, lastQueryAt: null, ...previous, ...theme,
+      discoveredAt: theme.classification.confidence === 'none' ? previous.discoveredAt : this.now(), curated });
   }
   prune() {
     const included = new Set(this.rules.include.map(r => r.id));
     for (const [id, row] of this.servers) {
-      if (this.rules.exclude.has(id) || (!included.has(id) && this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention)) this.servers.delete(id);
+      const lastThemeMatch = row.lastThemeMatchAt ?? Math.max(row.lastSeenAt || 0, row.discoveredAt || 0);
+      if (this.rules.exclude.has(id) || (!included.has(id) && (this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention ||
+        (row.classification.confidence === 'none' && this.now() - lastThemeMatch > this.config.retention)))) this.servers.delete(id);
       else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify(row, this.rules); }
     }
     const capacity = Math.max(this.config.maxServers, included.size);
@@ -59,12 +75,16 @@ export class Monitor {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...metadata(raw), ...this.geoip(row.ip), classification: classify(raw, this.rules, row.curated),
+          return { ...row, ...metadata(raw), ...this.geoip(row.ip), ...this.themeObservation(raw, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
         let successes = 0;
         results.forEach((result, i) => {
-          if (result.status === 'fulfilled') { successes++; this.servers.set(rows[i].id, result.value); }
+          if (result.status === 'fulfilled') {
+            successes++;
+            if (result.value.retire) this.servers.delete(rows[i].id);
+            else { const { retire, ...updated } = result.value; this.servers.set(rows[i].id, updated); }
+          }
           else {
             const row = rows[i]; const misses = (row.misses || 0) + 1;
             this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
@@ -84,7 +104,7 @@ export class Monitor {
   }
   snapshot() {
     const age = this.state.lastLiveAt === null ? null : Math.max(0, this.now() - this.state.lastLiveAt);
-    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, ...row }) => ({ ...row,
+    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' })),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,

@@ -1,13 +1,24 @@
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress, deduplicate } from '../utils/address.js';
 import { metadata, cleanText } from '../domain/server.js';
+// name_match supports wildcards. Restrict configured terms to literal ASCII words
+// so they cannot add filter operators or broaden a request with their own '*'.
+export function targetedTerms(rules) {
+  return [...new Set([...rules.strong, ...rules.weak]
+    .map(term => term.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().trim())
+    .filter(term => /^[a-z0-9]{4,32}$/.test(term)))].slice(0, 8);
+}
 // Public Steam Web API. Fixed origin; neither callers nor server metadata choose URLs.
-export function steamDiscovery(config, fetcher = fetch) {
+export function steamDiscovery(config, rules, fetcher = fetch) {
   return async () => {
     if (config.discoveryMode === 'seeds' || !config.steamKey) return { servers: [], disabled: true, partial: false, successfulRequests: 0 };
-    const results = await mapLimit([0, 1, 2, 3, 4, 5, 6, 7], 2, async region => {
+    const requests = [
+      ...Array.from({ length: 8 }, (_, region) => `\\appid\\10\\gamedir\\cstrike\\region\\${region}`),
+      ...targetedTerms(rules).map(term => `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`)
+    ];
+    const results = await mapLimit(requests, 2, async filter => {
       const url = new URL('https://api.steampowered.com/IGameServersService/GetServerList/v1/');
-      url.search = new URLSearchParams({ key: config.steamKey, filter: `\\appid\\10\\gamedir\\cstrike\\region\\${region}`, limit: String(config.discoveryLimit) });
+      url.search = new URLSearchParams({ key: config.steamKey, filter, limit: String(config.discoveryLimit) });
       const response = await fetcher(url, { signal: AbortSignal.timeout(config.discoveryTimeout), redirect: 'error' });
       if (!response.ok) throw new Error('Steam request failed');
       // Bound the decoded body, including responses without Content-Length.

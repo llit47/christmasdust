@@ -16,6 +16,7 @@ test('public polling never triggers discovery; visitor location is country only'
     assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store'); assert.ok(response.headers.get('content-security-policy').includes("script-src 'self'"));
     const body = await response.json(); assert.deepEqual(body.visitor, { countryCode: 'DE' });
   }
+  assert.equal((await get('/api/servers?filter=%5Cname_match%5C%2Aprivate%2A')).status, 200);
   assert.deepEqual(calls, []); assert.equal((await get('/api/query?ip=127.0.0.1')).status, 404);
 });
 test('health and readiness work independently of upstream freshness', async t => {

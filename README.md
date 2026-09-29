@@ -50,7 +50,7 @@ Open http://127.0.0.1:3000. `npm run dev` watches the server. `npm test` uses No
 
 ## Operation at a glance
 
-- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests every **10 minutes**; results are classified before monitoring.
+- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to eight configured theme-name searches every **10 minutes**; results are classified before monitoring.
 - Monitoring: GameDig **counterstrike16**, every **45 seconds**, eight concurrent queries, five-second attempt timeout.
 - Browser: polls only the cached snapshot every **30 seconds**, pauses while hidden.
 - Storage: atomic JSON snapshots; failures preserve last known data with explicit age and degraded status.
@@ -63,4 +63,4 @@ API: `GET /api/servers`, `GET /api/health`, `GET /api/ready`. Optional token-pro
 
 ## MVP limits
 
-Steam discovery needs an operator-provided API key and can be incomplete or capped. Some servers do not register with Steam; include them manually. IPv4 only. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have static checks and isolated transaction/rollback tests; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.
+Steam discovery needs an operator-provided API key and can be incomplete or capped. Some servers do not register with Steam; include them manually. Only routable public IPv4 endpoints are supported. Steam Networking / FakeIP servers need a separate resolution/query path and are intentionally excluded rather than queried with ordinary GameDig UDP. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have static checks and isolated transaction/rollback tests; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.
