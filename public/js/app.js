@@ -54,7 +54,9 @@ async function poll() {
     $('version').textContent = `v${snapshot.version}`;
     if (!location) $('location-status').textContent = snapshot.visitor.countryCode ? `Servers in ${snapshot.visitor.countryCode} are preferred. Use your location for approximate distance; coordinates stay in this browser.` : 'Choose a country to filter, or use your location for approximate distance. Coordinates stay in this browser.';
     if (!$('servers').contains(document.activeElement) && !$('servers').querySelector('details[open]')) render();
-  } catch { $('status').textContent = 'Could not reach the snapshot service. Retaining your last view; retrying automatically.'; }
+  } catch {
+    if (snapshot) { snapshot.servers = snapshot.servers.map(row => ({ ...row, stale: true })); if (!$('servers').contains(document.activeElement)) render(); }
+    $('status').textContent = 'Could not reach the snapshot service. Retaining your last view; retrying automatically.'; }
   finally { loading = false; }
 }
 $('filters').addEventListener('submit', event => event.preventDefault());

@@ -83,16 +83,21 @@ export class Monitor {
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }
   start() {
-    const tick = async (kind, delay) => {
+    this.timers = new Set();
+    const schedule = (kind, delay) => {
       if (this.stopped) return;
-      await this.run(kind);
-      if (!this.stopped) this.timers.push(setTimeout(() => tick(kind, delay), delay));
-      this.timers = this.timers.filter(timer => !timer._destroyed);
+      const timer = setTimeout(async () => {
+        this.timers.delete(timer);
+        await this.run(kind);
+        schedule(kind, delay);
+      }, delay);
+      this.timers.add(timer);
     };
-    this.timers = [];
     // Initial live query follows discovery, including when Steam fails.
-    this.initial = this.run('discovery').then(() => tick('live', this.config.liveInterval));
-    this.timers.push(setTimeout(() => tick('discovery', this.config.discoveryInterval), this.config.discoveryInterval));
+    this.initial = this.run('discovery').then(() => this.run('live')).then(() => {
+      schedule('discovery', this.config.discoveryInterval);
+      schedule('live', this.config.liveInterval);
+    });
   }
   stop() { this.stopped = true; for (const timer of this.timers || []) clearTimeout(timer); }
 }

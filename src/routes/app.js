@@ -4,6 +4,8 @@ import proxyaddr from 'proxy-addr';
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+let revision = null;
+try { revision = readFileSync(new URL('../../REVISION', import.meta.url), 'utf8').trim(); } catch { /* Development checkout. */ }
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url))).version;
 export function createApp({ config, monitor, geoip = () => ({}), now = Date.now }) {
   const app = express();
@@ -12,9 +14,13 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now 
   app.set('trust proxy', trust);
   app.use(helmet({ contentSecurityPolicy: { directives: { 'script-src': ["'self'"], 'style-src': ["'self'"], 'connect-src': ["'self'"], 'upgrade-insecure-requests': null } }, strictTransportSecurity: false }));
   app.use((_req, res, next) => { res.set('Permissions-Policy', 'geolocation=(self), camera=(), microphone=()'); next(); });
+  app.use((req, res, next) => {
+    if (req.headers['transfer-encoding'] || Number(req.headers['content-length'] || 0) > 0) return res.status(413).set('Connection', 'close').json({ error: 'Request bodies are not accepted' });
+    next();
+  });
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.get('/api/health', (_req, res) => res.json({ version, status: 'ok', ready: monitor.ready, ...monitor.snapshot().meta }));
-  app.get('/api/ready', (_req, res) => res.status(monitor.ready ? 200 : 503).json({ version, ready: monitor.ready }));
+  app.get('/api/health', (_req, res) => res.json({ version, revision, status: 'ok', ready: monitor.ready, ...monitor.snapshot().meta }));
+  app.get('/api/ready', (_req, res) => res.status(monitor.ready ? 200 : 503).json({ version, revision, ready: monitor.ready }));
   app.get('/api/servers', (req, res) => {
     let countryCode = geoip(req.ip).countryCode ?? null;
     if (config.trustCf && trust(req.socket.remoteAddress, 0)) {

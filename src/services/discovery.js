@@ -11,13 +11,13 @@ export function steamDiscovery(config, fetcher = fetch) {
       const response = await fetcher(url, { signal: AbortSignal.timeout(config.discoveryTimeout), redirect: 'error' });
       if (!response.ok) throw new Error('Steam request failed');
       // Bound the decoded body, including responses without Content-Length.
-      let body = ''; let bytes = 0;
+      const chunks = []; let bytes = 0;
       for await (const chunk of response.body) {
         bytes += chunk.length;
         if (bytes > 16000000) throw new Error('Steam response too large');
-        body += Buffer.from(chunk).toString('utf8');
+        chunks.push(Buffer.from(chunk));
       }
-      const rows = JSON.parse(body)?.response?.servers;
+      const rows = JSON.parse(Buffer.concat(chunks).toString('utf8'))?.response?.servers;
       if (!Array.isArray(rows)) throw new Error('Invalid Steam response');
       const servers = [];
       for (const raw of rows.slice(0, config.discoveryLimit)) {

@@ -38,7 +38,7 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   actions.append(join, copyButton);
   const details = e('details'); details.append(e('summary', 'Server details'));
   const date = value => value ? new Date(value).toLocaleString() : 'Never';
-  details.append(e('p', `${server.id} · ${server.bots} bots · Last seen: ${date(server.lastSeenAt)}`), e('p', `Monitor query latency: ${server.backendQueryMs ?? 'unknown'}${server.backendQueryMs === null ? '' : ' ms'}. Measured from this website’s backend, not your ping.`), e('p', server.classification.reasons.join(' · ')));
+  details.append(e('p', `${server.id} · ${server.bots ?? 'unknown'} bots · Last seen: ${date(server.lastSeenAt)}`), e('p', `Monitor query latency: ${server.backendQueryMs ?? 'unknown'}${server.backendQueryMs == null ? '' : ' ms'}. Measured from this website’s backend, not your ping.`), e('p', server.classification.reasons.join(' · ')));
   const info = e('div', undefined, 'server-info'); info.append(title, sub, tags);
   card.append(info, population, actions, details);
   return card;

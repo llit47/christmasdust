@@ -2,6 +2,6 @@ export const cleanText = value => typeof value === 'string' ? value.replace(/[\x
 const count = value => Number.isFinite(value) ? Math.max(0, Math.min(65535, Math.floor(value))) : 0;
 export function metadata(raw) {
   return { name: cleanText(raw.name), map: cleanText(raw.map), players: count(raw.numplayers ?? raw.players),
-    maxPlayers: count(raw.maxplayers ?? raw.maxPlayers), bots: count(Array.isArray(raw.bots) ? raw.bots.length : raw.bots),
+    maxPlayers: count(raw.maxplayers ?? raw.maxPlayers), bots: Number.isFinite(raw.raw?.numbots) ? count(raw.raw.numbots) : typeof raw.bots === 'number' ? count(raw.bots) : Array.isArray(raw.bots) && raw.bots.length ? raw.bots.length : null,
     password: Boolean(raw.password), backendQueryMs: Number.isFinite(raw.ping) ? Math.max(0, Math.round(raw.ping)) : null };
 }
