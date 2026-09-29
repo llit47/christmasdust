@@ -1,5 +1,8 @@
 node_modules/
 .env
+.env.*
+!.env.example
 data/
+*.mmdb
 *.log
-.DS_Store
+coverage/
