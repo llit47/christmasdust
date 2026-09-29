@@ -12,6 +12,7 @@ import { gameQuery } from '../src/services/query.js';
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
 const a = { ...parseAddress('8.8.8.8:27015'), name: 'Christmas A' };
 const b = { ...parseAddress('1.1.1.1:27015'), name: 'Christmas B' };
+const tagsOnly = { ...parseAddress('9.9.9.9:27015'), name: 'Public Server', map: 'de_dust2', tags: 'xmas,secure' };
 function fixture(overrides = {}) {
   let time = 1000000;
   const monitor = new Monitor({ config: readConfig({}), rules, discover: async () => ({ servers: [a, b], successfulRequests: 1, partial: false }),
@@ -96,6 +97,52 @@ test('successful live queries can retire a server even between discovery cycles'
   assert.equal(monitor.servers.has(a.id), false);
   assert.equal(monitor.servers.has(b.id), true);
 });
+test('Steam tags-only evidence survives repeated GameDig observations and snapshot restore', async () => {
+  let saved = null;
+  const store = { load: async () => saved, save: async value => { saved = structuredClone(value); } };
+  const adapters = { store, discover: async () => ({ servers: [tagsOnly], successfulRequests: 1 }),
+    query: async () => ({ name: 'Public Server', map: 'de_dust2', numplayers: 12 }) };
+  const { monitor } = fixture(adapters);
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.get(tagsOnly.id).classification.confidence, 'high');
+  assert.deepEqual(monitor.servers.get(tagsOnly.id).classification.reasons, ['tags: xmas']);
+  for (let i = 0; i < 3; i++) await monitor.run('live');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 0);
+  assert.equal(monitor.servers.get(tagsOnly.id).discoveryTags, 'xmas,secure');
+  const publicRow = monitor.snapshot().servers.find(row => row.id === tagsOnly.id);
+  assert.equal(publicRow.classification.confidence, 'high');
+  assert.equal(Object.hasOwn(publicRow, 'discoveryTags'), false);
+  const restored = fixture(adapters).monitor; await restored.init(); await restored.run('live');
+  assert.equal(restored.servers.get(tagsOnly.id).classification.confidence, 'high');
+});
+test('explicit updated Steam tags can retire a tags-only candidate; omitted tags cannot', async () => {
+  let discovered = [tagsOnly];
+  const { tags: _tags, ...withoutTags } = tagsOnly;
+  const { monitor } = fixture({ discover: async () => ({ servers: discovered, successfulRequests: 1 }) });
+  await monitor.init(); await monitor.run('discovery');
+  discovered = [withoutTags]; await monitor.run('discovery');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 0);
+  assert.equal(monitor.servers.get(tagsOnly.id).discoveryTags, 'xmas,secure');
+  discovered = [{ ...tagsOnly, tags: 'secure' }]; await monitor.run('discovery');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 1);
+  assert.equal(monitor.snapshot().servers.some(row => row.id === tagsOnly.id), false);
+  await monitor.run('discovery');
+  assert.equal(monitor.servers.has(tagsOnly.id), false);
+});
+test('positive GameDig name/map evidence restores a candidate after Steam tags change', async () => {
+  let discovered = [tagsOnly];
+  let live = { name: 'Public Server', map: 'de_dust2' };
+  const { monitor } = fixture({ discover: async () => ({ servers: discovered, successfulRequests: 1 }), query: async () => live });
+  await monitor.init(); await monitor.run('discovery');
+  discovered = [{ ...tagsOnly, tags: 'secure' }]; await monitor.run('discovery');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 1);
+  live = { name: 'Public Server', map: 'de_xmas' }; await monitor.run('live');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 0);
+  assert.equal(monitor.snapshot().servers[0].classification.confidence, 'high');
+  live = { name: 'Public Server', map: 'de_dust2' }; await monitor.run('live');
+  assert.equal(monitor.servers.get(tagsOnly.id).themeMisses, 1);
+  assert.equal(monitor.snapshot().servers.length, 0);
+});
 test('retiring a hidden automatic candidate releases MAX_SERVERS capacity', async () => {
   let discovered = [a];
   const { monitor } = fixture({ config: readConfig({ MAX_SERVERS: '1' }),
@@ -154,6 +201,16 @@ test('regional upstream failure preserves successful discovery and deduplicates'
   const result = await discover(); assert.equal(result.servers.length, 1); assert.equal(result.partial, true); assert.equal(result.successfulRequests, 7);
   assert.equal(urls.length, 8); assert.ok(urls.every(url => url.searchParams.get('filter').includes('\\appid\\10')));
 });
+test('Steam gametype alone creates a monitored Christmas candidate', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const discover = steamDiscovery(config, rules, async () => new Response(JSON.stringify({ response: { servers: [
+    { addr: tagsOnly.id, appid: 10, gamedir: 'cstrike', name: 'Public Server', map: 'de_dust2', gametype: 'xmas,secure' }
+  ] } })));
+  const { monitor } = fixture({ discover });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.get(tagsOnly.id).discoveryTags, 'xmas,secure');
+  assert.equal(monitor.snapshot().servers[0].classification.confidence, 'high');
+});
 test('disabled and truncated discovery are explicit', async () => {
   const disabled = await steamDiscovery(readConfig({}), rules, () => { throw Error('must not request'); })(); assert.equal(disabled.disabled, true);
   const result = await steamDiscovery(readConfig({ STEAM_API_KEY: 'a'.repeat(32), DISCOVERY_LIMIT: '1' }), { strong: [], weak: [] }, async () => new Response(JSON.stringify({ response: { servers: [{ addr: a.id, appid: 10 }] } })))();
@@ -173,7 +230,7 @@ test('broad and targeted discovery merge safely despite a targeted failure', asy
     active++; peak = Math.max(peak, active);
     await new Promise(resolve => setTimeout(resolve, 1)); active--;
     if (filter.includes('name_match\\*santa*')) throw Error('targeted timeout');
-    const rows = filter.endsWith('region\\0') ? [{ addr: a.id, appid: 10, gamedir: 'cstrike', name: 'Christmas A', map: 'de_xmas' }] :
+    const rows = filter.endsWith('region\\0') ? [{ addr: a.id, appid: 10, gamedir: 'cstrike', name: 'Christmas A', map: 'de_xmas', gametype: 'xmas,secure' }] :
       filter.includes('name_match\\*xmas*') ? [
         { addr: a.id, appid: 10, gamedir: 'cstrike', name: 'Christmas A', map: 'de_xmas' },
         { addr: niche.id, appid: 10, gamedir: 'cstrike', name: 'Niche Xmas', map: 'de_dust2', players: 12, max_players: 32 },
@@ -184,6 +241,7 @@ test('broad and targeted discovery merge safely despite a targeted failure', asy
   });
   const result = await discover();
   assert.deepEqual(result.servers.map(row => row.id).sort(), [a.id, niche.id].sort());
+  assert.equal(result.servers.find(row => row.id === a.id).tags, 'xmas,secure');
   assert.equal(result.servers.find(row => row.id === niche.id).maxPlayers, 32);
   assert.equal(result.partial, true); assert.equal(result.successfulRequests, 10);
   assert.equal(filters.length, 11); assert.equal(peak, 2);

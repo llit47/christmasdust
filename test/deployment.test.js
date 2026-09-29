@@ -12,7 +12,7 @@ async function transaction(t, failure = '') {
   const old = join(dir, 'root/releases/previous');
   await symlink(old, join(dir, 'root/current')); await symlink(process.execPath, join(dir, 'root/node/bin/node'));
   await writeFile(join(old, 'REVISION'), 'old'); await writeFile(join(dir, 'lib/snapshot.json'), 'previous-snapshot');
-  await writeFile(join(dir, 'etc/channel'), 'main'); await writeFile(join(dir, 'etc/christmasdust.env'), 'HOST=127.0.0.1\nPORT=3000\n');
+  await writeFile(join(dir, 'etc/channel'), 'main'); await writeFile(join(dir, 'etc/christmasdust.env'), 'HOST=127.0.0.1\nPORT=3001\n');
   await writeFile(join(dir, 'fixture/package.json'), '{"type":"module"}');
   await writeFile(join(dir, 'fixture/src/config/index.js'), 'export const readConfig=()=>({}); export const loadDetection=async()=>({});');
   await writeFile(join(dir, 'fixture/src/services/geoip.js'), 'export const loadGeoip=async()=>()=>({});');

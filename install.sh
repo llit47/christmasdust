@@ -48,7 +48,7 @@ systemctl enable christmasdust
 /usr/local/bin/christmasdust update "$channel"
 cat <<'MESSAGE'
 ChristmasDust installed and healthy.
-URL: http://127.0.0.1:3000 (default; put a TLS reverse proxy in front for public access)
+URL: http://127.0.0.1:3001 (default; put a TLS reverse proxy in front for public access)
 Service: christmasdust.service
 Config: /etc/christmasdust/christmasdust.env
 Add STEAM_API_KEY for automatic discovery, or include public IP:port servers in /etc/christmasdust/detection.json.

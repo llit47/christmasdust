@@ -6,7 +6,7 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | --- | --- | --- |
 | NODE_ENV | production in example; development if absent | Express runtime mode: production, development, test |
 | HOST | 127.0.0.1 | Literal listen IP; use 0.0.0.0 only with appropriate firewall/proxy setup |
-| PORT | 3000 | TCP port, 1–65535; unprivileged ports recommended |
+| PORT | 3001 | TCP port, 1–65535; unprivileged ports recommended |
 | DISCOVERY_INTERVAL_MS | 600000 | Discovery delay, 60000–86400000 |
 | LIVE_INTERVAL_MS | 45000 | Live refresh delay, 10000–3600000 |
 | QUERY_CONCURRENCY | 8 | Maximum simultaneous game queries, 1–32 |

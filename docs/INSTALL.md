@@ -1,6 +1,8 @@
 # Native installation
 
-Supported: Debian 12/13 or Ubuntu 22.04/24.04 with running systemd, x86_64 or ARM64. Root is needed for setup; the web process always runs as `christmasdust`. Outbound HTTPS accesses GitHub, npm, nodejs.org and Steam; outbound UDP reaches public game query ports. Incoming HTTP defaults to loopback port 3000.
+Supported: Debian 12/13 or Ubuntu 22.04/24.04 with running systemd, x86_64 or ARM64. Root is needed for setup; the web process always runs as `christmasdust`. Outbound HTTPS accesses GitHub, npm, nodejs.org and Steam; outbound UDP reaches public game query ports. Incoming HTTP defaults to loopback port 3001.
+
+Existing installations keep their configured `PORT` during updates; change it in `/etc/christmasdust/christmasdust.env` if moving an older installation to 3001.
 
 The README shows the one-line installer. For review first:
 
@@ -34,7 +36,7 @@ Use your existing TLS proxy (Caddy example):
 
 ```caddyfile
 winter.example.com {
-    reverse_proxy 127.0.0.1:3000
+    reverse_proxy 127.0.0.1:3001
 }
 ```
 
@@ -47,7 +49,7 @@ Install Node 24, create the unprivileged user, install a checkout with `npm ci -
 ```sh
 sudo systemctl daemon-reload
 sudo systemctl enable --now christmasdust
-curl -fsS http://127.0.0.1:3000/api/ready
+curl -fsS http://127.0.0.1:3001/api/ready
 ```
 
 Manual checkout users can run `npm start` directly under an unprivileged account; no root or systemd is required for development. The native updater assumes the installer's directory layout.

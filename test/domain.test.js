@@ -16,6 +16,7 @@ test('Steam and GameDig player capacities keep their source field shapes', () =>
 });
 test('configuration defaults and strict validation', () => {
   assert.equal(readConfig({}).liveInterval, 45000);
+  assert.equal(readConfig({}).port, 3001);
   for (const env of [{ PORT: '30oops' }, { PORT: '' }, { NODE_ENV: 'prod' }, { QUERY_CONCURRENCY: '0' }, { DISCOVERY_MODE: 'steam' }, { ADMIN_TOKEN: 'short' }, { TRUST_CF_COUNTRY: 'yes' }, { TRUST_CF_COUNTRY: 'true' }, { TRUSTED_PROXIES: 'true' }, { TRUSTED_PROXIES: '1.1.1.1/33' }, { HOST: 'localhost' }, { STEAM_API_KEY: 'oops' }, { STALE_AFTER_MS: '10000' }]) assert.throws(() => readConfig(env));
   assert.equal(readConfig({ TRUSTED_PROXIES: '127.0.0.1/32', TRUST_CF_COUNTRY: 'true' }).trustCf, true);
 });

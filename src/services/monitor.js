@@ -36,12 +36,13 @@ export class Monitor {
     const address = parseAddress(raw.id);
     if (this.rules.exclude.has(address.id)) return;
     const previous = this.servers.get(address.id);
-    const { retire, ...theme } = this.themeObservation(raw, previous, curated);
+    const discoveryTags = typeof raw.tags === 'string' ? cleanText(raw.tags) : previous?.discoveryTags;
+    const { retire, ...theme } = this.themeObservation({ ...raw, tags: discoveryTags }, previous, curated);
     if (retire) { this.servers.delete(address.id); return; }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
     // Discovery metadata must not overwrite a trustworthy live response.
     this.servers.set(address.id, { ...metadata(raw), ...address, ...this.geoip(address.ip), status: 'unknown', misses: 0,
-      lastSeenAt: null, lastQueryAt: null, ...previous, ...theme,
+      lastSeenAt: null, lastQueryAt: null, ...previous, discoveryTags, ...theme,
       discoveredAt: theme.classification.confidence === 'none' ? previous.discoveredAt : this.now(), curated });
   }
   prune() {
@@ -50,7 +51,7 @@ export class Monitor {
       const lastThemeMatch = row.lastThemeMatchAt ?? Math.max(row.lastSeenAt || 0, row.discoveredAt || 0);
       if (this.rules.exclude.has(id) || (!included.has(id) && (this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention ||
         (row.classification.confidence === 'none' && this.now() - lastThemeMatch > this.config.retention)))) this.servers.delete(id);
-      else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify(row, this.rules); }
+      else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify({ ...row, tags: row.discoveryTags }, this.rules); }
     }
     const capacity = Math.max(this.config.maxServers, included.size);
     const removable = [...this.servers.values()].filter(row => !included.has(row.id))
@@ -75,7 +76,8 @@ export class Monitor {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...metadata(raw), ...this.geoip(row.ip), ...this.themeObservation(raw, row, row.curated),
+          return { ...row, ...metadata(raw), ...this.geoip(row.ip),
+            ...this.themeObservation({ ...raw, tags: row.discoveryTags }, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
         let successes = 0;
@@ -104,7 +106,7 @@ export class Monitor {
   }
   snapshot() {
     const age = this.state.lastLiveAt === null ? null : Math.max(0, this.now() - this.state.lastLiveAt);
-    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, ...row }) => ({ ...row,
+    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' })),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,

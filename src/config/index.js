@@ -28,7 +28,7 @@ export function readConfig(env = process.env) {
   const adminToken = env.ADMIN_TOKEN ?? '';
   if (adminToken && (adminToken.length < 32 || /\s/.test(adminToken))) throw new Error('ADMIN_TOKEN must be at least 32 non-whitespace characters');
   const cfg = { mode, host, discoveryMode, steamKey, trustedProxies, trustCf, adminToken,
-    port: number('PORT', 3000, 1, 65535), discoveryInterval: number('DISCOVERY_INTERVAL_MS', 600000, 60000, 86400000),
+    port: number('PORT', 3001, 1, 65535), discoveryInterval: number('DISCOVERY_INTERVAL_MS', 600000, 60000, 86400000),
     liveInterval: number('LIVE_INTERVAL_MS', 45000, 10000, 3600000), concurrency: number('QUERY_CONCURRENCY', 8, 1, 32),
     queryTimeout: number('QUERY_TIMEOUT_MS', 5000, 500, 30000), discoveryTimeout: number('DISCOVERY_TIMEOUT_MS', 15000, 1000, 60000),
     discoveryLimit: number('DISCOVERY_LIMIT', 5000, 1, 20000), maxServers: number('MAX_SERVERS', 1000, 1, 5000),

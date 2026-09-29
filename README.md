@@ -20,7 +20,7 @@ For this draft MVP, use the feature branch explicitly:
 curl -fsSL https://raw.githubusercontent.com/llit47/christmasdust/feat/initial-mvp/install.sh | sudo env CHRISTMASDUST_CHANNEL=feat/initial-mvp bash
 ```
 
-Review downloaded scripts before running as root if preferred. Requires Debian/Ubuntu with systemd, x86_64 or ARM64, and outbound HTTPS/UDP. The installer downloads checksum-verified official Node 24 LTS, creates an unprivileged service, preserves existing configuration and checks HTTP readiness. Default URL: **http://127.0.0.1:3000**. Configure a TLS reverse proxy for public access.
+Review downloaded scripts before running as root if preferred. Requires Debian/Ubuntu with systemd, x86_64 or ARM64, and outbound HTTPS/UDP. The installer downloads checksum-verified official Node 24 LTS, creates an unprivileged service, preserves existing configuration and checks HTTP readiness. Default URL: **http://127.0.0.1:3001**. Configure a TLS reverse proxy for public access.
 
 **Before servers appear:** add a Steam Web API key to `/etc/christmasdust/christmasdust.env`, or curated public `IP:PORT` addresses to the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust`. No sample or invented servers are shown to players. GeoIP is optional.
 
@@ -46,7 +46,7 @@ cp .env.example .env
 npm start
 ```
 
-Open http://127.0.0.1:3000. `npm run dev` watches the server. `npm test` uses Node's runner with injected offline adapters; `npm run check` checks JavaScript syntax and the frontend rendering boundary. `bash -n install.sh scripts/christmasdust` checks shell syntax. CI also runs ShellCheck. Tests bind ephemeral loopback ports and need no external services.
+Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses Node's runner with injected offline adapters; `npm run check` checks JavaScript syntax and the frontend rendering boundary. `bash -n install.sh scripts/christmasdust` checks shell syntax. CI also runs ShellCheck. Tests bind ephemeral loopback ports and need no external services.
 
 ## Operation at a glance
 

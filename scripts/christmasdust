@@ -46,7 +46,7 @@ health() {
   endpoint=$("$NODE" --env-file="$CONFIG/christmasdust.env" --input-type=module -e '
     const host=process.env.HOST||"127.0.0.1";
     const target=["0.0.0.0","::"].includes(host)?"127.0.0.1":host;
-    console.log("http://"+(target.includes(":")?"["+target+"]":target)+":"+(process.env.PORT||3000)+"/api/ready");')
+    console.log("http://"+(target.includes(":")?"["+target+"]":target)+":"+(process.env.PORT||3001)+"/api/ready");')
   for _ in {1..30}; do
     if systemctl is-active --quiet christmasdust &&
       curl --noproxy '*' -fsS --max-time 2 "$endpoint" | "$NODE" --input-type=module -e '

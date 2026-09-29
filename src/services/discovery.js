@@ -1,5 +1,5 @@
 import { mapLimit } from '../utils/concurrency.js';
-import { parseAddress, deduplicate } from '../utils/address.js';
+import { parseAddress } from '../utils/address.js';
 import { metadata, cleanText } from '../domain/server.js';
 // name_match supports wildcards. Restrict configured terms to literal ASCII words
 // so they cannot add filter operators or broaden a request with their own '*'.
@@ -33,11 +33,16 @@ export function steamDiscovery(config, rules, fetcher = fetch) {
       const servers = [];
       for (const raw of rows.slice(0, config.discoveryLimit)) {
         if (Number(raw.appid) !== 10 || (raw.gamedir && raw.gamedir !== 'cstrike')) continue;
-        try { servers.push({ ...metadata(raw), ...parseAddress(raw.addr), tags: cleanText(raw.gametype) }); } catch { /* reject non-public/invalid endpoints */ }
+        try {
+          servers.push({ ...metadata(raw), ...parseAddress(raw.addr),
+            ...(typeof raw.gametype === 'string' ? { tags: cleanText(raw.gametype) } : {}) });
+        } catch { /* reject non-public/invalid endpoints */ }
       }
       return { servers, truncated: rows.length >= config.discoveryLimit };
     });
     const good = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-    return { servers: deduplicate(good.flatMap(r => r.servers)), partial: good.length !== results.length || good.some(r => r.truncated), successfulRequests: good.length, disabled: false };
+    const merged = new Map();
+    for (const row of good.flatMap(result => result.servers)) merged.set(row.id, { ...merged.get(row.id), ...row });
+    return { servers: [...merged.values()], partial: good.length !== results.length || good.some(r => r.truncated), successfulRequests: good.length, disabled: false };
   };
 }
