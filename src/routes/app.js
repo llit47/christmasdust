@@ -10,6 +10,7 @@ const version = JSON.parse(readFileSync(new URL('../../package.json', import.met
 export function createApp({ config, monitor, geoip = () => ({}), now = Date.now }) {
   const app = express();
   app.disable('x-powered-by');
+  app.set('env', config.mode);
   const trust = proxyaddr.compile(config.trustedProxies);
   app.set('trust proxy', trust);
   app.use(helmet({ contentSecurityPolicy: { directives: { 'script-src': ["'self'"], 'style-src': ["'self'"], 'connect-src': ["'self'"], 'upgrade-insecure-requests': null } }, strictTransportSecurity: false }));

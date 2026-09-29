@@ -16,7 +16,7 @@ Cadences are delays after completed cycles, not real-time deadlines. Slow cycles
 
 ## Update and rollback
 
-Updater takes a lock, clones the configured branch/tag into a separate staging directory, runs `npm ci --omit=dev --ignore-scripts`, tests, static checks and config/GeoIP validation as the service user. It makes the finished release root-owned and readable, stops the old service, copies the standard snapshot for rollback, atomically switches `current`, starts the service and polls HTTP readiness for up to 30 attempts. On failure after the switch, it restores the previous symlink and saved snapshot, restarts and reports recovery health. Config and data are never replaced by a new checkout. Previous release directories are retained; only the temporary staging directory is removed.
+Updater takes a lock, clones the configured branch/tag into a separate staging directory, runs `npm ci --omit=dev --ignore-scripts`, tests, static checks and config/GeoIP validation as the service user. It makes the finished release root-owned and readable, stops the old service, copies the standard snapshot for rollback, atomically switches `current`, starts the service and polls HTTP readiness and the expected Git revision for up to 30 attempts. On failure after the switch, it restores the previous symlink and saved snapshot, restarts and reports recovery health. Config and data are never replaced by a new checkout. Previous release directories are retained; only the temporary staging directory is removed.
 
 The standard snapshot path is `/var/lib/christmasdust/snapshot.json`. Custom snapshot locations require your own backups; update rollback backs up only the standard path. There are no schema migrations in 0.1.0; future migrations must remain rollback-compatible. Upstream Steam failure deliberately does not fail an application update. First install has no previous release to restore; inspect the journal and retry after correcting configuration/network access.
 
@@ -38,4 +38,4 @@ The admin refresh endpoint is optional. Set a generated high-entropy ADMIN_TOKEN
 
 ## Release validation still required
 
-Automated tests use injected network adapters; live Steam access requires a real operator key. Before public launch, verify Steam results and UDP access on the deployment host, install/update/fail-health rollback on a disposable Debian/Ubuntu VM, configure TLS, and inspect desktop/mobile behavior with real server populations. No live-network tests belong in CI.
+Automated tests use injected network adapters and exercise updater success, preparation failure and rollback with temporary paths and OS/network shims; live Steam access requires a real operator key. Before public launch, verify Steam results and UDP access on the deployment host, install/update/fail-health rollback on a disposable Debian/Ubuntu VM, configure TLS, and inspect desktop/mobile behavior with real server populations. No live-network tests belong in CI.

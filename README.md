@@ -63,4 +63,4 @@ API: `GET /api/servers`, `GET /api/health`, `GET /api/ready`. Optional token-pro
 
 ## MVP limits
 
-Steam discovery needs an operator-provided API key and can be incomplete or capped. Some servers do not register with Steam; include them manually. IPv4 only. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have automated static checks; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.
+Steam discovery needs an operator-provided API key and can be incomplete or capped. Some servers do not register with Steam; include them manually. IPv4 only. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have static checks and isolated transaction/rollback tests; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.

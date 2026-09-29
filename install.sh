@@ -11,7 +11,7 @@ channel=${CHRISTMASDUST_CHANNEL:-main}
 [[ $channel =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ && $channel != *..* ]] || { echo 'Invalid channel'; exit 1; }
 if [[ -L /opt/christmasdust/current ]]; then
   echo 'Existing installation found; preserving configuration and running updater.'
-  exec /usr/local/bin/christmasdust update "$channel"
+  exec /usr/local/bin/christmasdust update "${CHRISTMASDUST_CHANNEL:-$(cat /etc/christmasdust/channel)}"
 fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq

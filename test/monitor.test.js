@@ -94,3 +94,8 @@ test('scheduler starts discovery then live and stops future work', async () => {
   await monitor.init(); monitor.start(); await monitor.initial; monitor.stop();
   assert.deepEqual(calls, ['discovery', 'query']); assert.equal(await monitor.run('live'), false);
 });
+test('restoring after a reduced capacity preserves includes and stays bounded', async () => {
+  const saved = { schema: 1, state: {}, servers: [a, b].map(row => ({ ...row, classification: { confidence: 'high', reasons: [] }, discoveredAt: 1000000 })) };
+  const { monitor } = fixture({ config: readConfig({ MAX_SERVERS: '1' }), rules: { ...rules, include: [b] }, store: { load: async () => saved, save: async () => {} } });
+  await monitor.init(); assert.equal(monitor.servers.size, 1); assert.equal(monitor.servers.has(b.id), true);
+});

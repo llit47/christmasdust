@@ -15,6 +15,7 @@ export class Monitor {
     } catch { this.log.warn('Snapshot restore failed; starting with configured seeds'); this.state.persistenceError = true; }
     this.prune();
     for (const row of this.rules.include) this.add(row, true);
+    this.prune();
     this.ready = true;
   }
   add(raw, curated = false) {
@@ -34,6 +35,13 @@ export class Monitor {
     for (const [id, row] of this.servers) {
       if (this.rules.exclude.has(id) || (!included.has(id) && this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention)) this.servers.delete(id);
       else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify(row, this.rules); }
+    }
+    const capacity = Math.max(this.config.maxServers, included.size);
+    const removable = [...this.servers.values()].filter(row => !included.has(row.id))
+      .sort((a, b) => (a.lastSeenAt || a.discoveredAt || 0) - (b.lastSeenAt || b.discoveredAt || 0));
+    for (const row of removable) {
+      if (this.servers.size <= capacity) break;
+      this.servers.delete(row.id);
     }
   }
   async run(kind, ids) {
