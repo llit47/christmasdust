@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+ROOT=/opt/christmasdust
+CONFIG=/etc/christmasdust
+NODE="$ROOT/node/bin/node"
+export PATH="$ROOT/node/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if [[ ${1:-} == version ]]; then
+  "$NODE" -p 'const fs=require("fs"); const p="/opt/christmasdust/current/"; JSON.parse(fs.readFileSync(p+"package.json")).version+" ("+fs.readFileSync(p+"REVISION","utf8").trim()+")"'
+  exit
+fi
+[[ ${1:-} == update ]] || { echo 'Usage: christmasdust version | sudo christmasdust update [branch-or-tag]'; exit 2; }
+[[ $EUID == 0 ]] || { echo 'Updates require root.' >&2; exit 1; }
+exec 9>/run/lock/christmasdust-update.lock
+flock -n 9 || { echo 'Another update is running.' >&2; exit 1; }
+channel=${2:-$(cat "$CONFIG/channel")}
+[[ $channel =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ && $channel != *..* ]] || { echo 'Invalid branch/tag'; exit 1; }
+previous=$(readlink -f "$ROOT/current" || true)
+stage=$(mktemp -d "$ROOT/releases/staging.XXXXXXXX")
+chown christmasdust:christmasdust "$stage"
+switched=false
+snapshot_backup=$(mktemp -d /var/lib/christmasdust-update.XXXXXXXX)
+cleanup() { rm -rf -- "$stage" "$snapshot_backup"; }
+rollback() {
+  local result=$?
+  trap - ERR INT TERM
+  if [[ $switched == true && -n $previous && -d $previous ]]; then
+    echo 'Update failed; restoring previous application and snapshot.' >&2
+    systemctl stop christmasdust || true
+    ln -s "$previous" "$ROOT/rollback-link"
+    mv -Tf "$ROOT/rollback-link" "$ROOT/current"
+    if [[ -f $snapshot_backup/snapshot.json ]]; then
+      cp -p "$snapshot_backup/snapshot.json" /var/lib/christmasdust/snapshot.json
+    fi
+    systemctl reset-failed christmasdust || true
+    systemctl start christmasdust || true
+    if health; then echo 'Previous version is healthy.' >&2; else echo 'Rollback needs attention: journalctl -u christmasdust' >&2; fi
+  fi
+  exit "${result:-1}"
+}
+trap cleanup EXIT
+trap rollback ERR INT TERM
+health() {
+  local endpoint
+  endpoint=$("$NODE" --env-file="$CONFIG/christmasdust.env" --input-type=module -e '
+    const host=process.env.HOST||"127.0.0.1";
+    const target=["0.0.0.0","::"].includes(host)?"127.0.0.1":host;
+    console.log("http://"+(target.includes(":")?"["+target+"]":target)+":"+(process.env.PORT||3000)+"/api/ready");')
+  for _ in {1..30}; do
+    if systemctl is-active --quiet christmasdust && curl --noproxy '*' -fsS --max-time 2 "$endpoint" >/dev/null; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+echo "Preparing ChristmasDust channel: $channel"
+runuser -u christmasdust -- git clone --quiet --depth 1 --branch "$channel" -- https://github.com/llit47/christmasdust.git "$stage/app"
+revision=$(git -c safe.directory="$stage/app" -C "$stage/app" rev-parse HEAD)
+printf '%s\n' "$revision" > "$stage/app/REVISION"
+# No lifecycle scripts execute during deployment; the app has no build step.
+(cd "$stage/app" && runuser -u christmasdust -- npm ci --omit=dev --ignore-scripts --cache "$stage/npm-cache")
+(cd "$stage/app" && runuser -u christmasdust -- npm test && runuser -u christmasdust -- npm run check)
+# Validate the operator configuration before touching the running release.
+(cd "$stage/app" && runuser -u christmasdust -- "$NODE" --env-file="$CONFIG/christmasdust.env" --input-type=module -e '
+  import {readConfig,loadDetection} from "./src/config/index.js";
+  import {loadGeoip} from "./src/services/geoip.js";
+  const c=readConfig(); await loadDetection(c.detectionPath); await loadGeoip(c.geoipPath);')
+release="$ROOT/releases/$(date -u +%Y%m%dT%H%M%S)-${revision:0:12}"
+[[ ! -e $release ]]
+mv "$stage/app" "$release"
+chown -R root:root "$release"
+chmod -R a+rX,go-w "$release"
+switched=true
+systemctl stop christmasdust
+if [[ -f /var/lib/christmasdust/snapshot.json ]]; then cp -p /var/lib/christmasdust/snapshot.json "$snapshot_backup/snapshot.json"; fi
+ln -s "$release" "$ROOT/next-link"
+mv -Tf "$ROOT/next-link" "$ROOT/current"
+systemctl reset-failed christmasdust || true
+systemctl start christmasdust
+health
+# Keep the management command in sync only after the candidate passes health.
+install -m 0755 "$release/scripts/christmasdust" /usr/local/bin/christmasdust
+printf '%s\n' "$channel" > "$CONFIG/channel"
+switched=false
+echo "ChristmasDust updated to $revision. Previous release retained: ${previous:-none}"

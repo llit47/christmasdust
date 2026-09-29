@@ -1,0 +1,41 @@
+[Unit]
+Description=ChristmasDust CS 1.6 winter server browser
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=christmasdust
+Group=christmasdust
+WorkingDirectory=/opt/christmasdust/current
+EnvironmentFile=/etc/christmasdust/christmasdust.env
+ExecStart=/opt/christmasdust/node/bin/node src/index.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0027
+StateDirectory=christmasdust
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/christmasdust
+# V8 JIT requires executable mappings; MemoryDenyWriteExecute is deliberately omitted.
+
+[Install]
+WantedBy=multi-user.target
