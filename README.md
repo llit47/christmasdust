@@ -1,6 +1,6 @@
 # ✳ ChristmasDust
 
-**A little snow. A lot of Counter-Strike.** A fast, self-hosted browser for Christmas and winter Counter-Strike 1.6 servers.
+**A little snow. A lot of Counter-Strike.** A fast, self-hosted browser for Christmas-themed Counter-Strike 1.6 servers.
 
 A dark winter page opens straight into a server list: country, map, population, confidence, Steam connect and copy command. Filter by country, map, open slots and theme confidence; save favorites locally. Optional location ranks approximate distances entirely in the browser. No account, tracking, frontend framework or database.
 
@@ -8,16 +8,8 @@ A dark winter page opens straight into a server list: country, map, population, 
 
 ## Quick install — Debian / Ubuntu
 
-Once this feature is released on main:
-
 ```sh
 curl -fsSL https://raw.githubusercontent.com/llit47/christmasdust/main/install.sh | sudo bash
-```
-
-For this draft MVP, use the feature branch explicitly:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/llit47/christmasdust/feat/initial-mvp/install.sh | sudo env CHRISTMASDUST_CHANNEL=feat/initial-mvp bash
 ```
 
 Review downloaded scripts before running as root if preferred. Requires Debian/Ubuntu with systemd, x86_64 or ARM64, and outbound HTTPS/UDP. The installer downloads checksum-verified official Node 24 LTS, creates an unprivileged service, preserves existing configuration and checks HTTP readiness. Default URL: **http://127.0.0.1:3001**. Configure a TLS reverse proxy for public access.
@@ -39,7 +31,6 @@ Use Node.js 24 LTS and an unprivileged account:
 ```sh
 git clone https://github.com/llit47/christmasdust.git
 cd christmasdust
-git switch feat/initial-mvp         # until the MVP is released
 npm ci
 cp .env.example .env
 # Set STEAM_API_KEY, or add curated endpoints to config/detection.json.
@@ -50,11 +41,11 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 
 ## Operation at a glance
 
-- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to eight configured theme-name searches every **10 minutes**; results are classified before monitoring.
+- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to ten bounded theme-name/exact-map searches every **10 minutes**; results are classified before monitoring.
 - Monitoring: GameDig **counterstrike16**, every **45 seconds**, eight concurrent queries, five-second attempt timeout.
 - Browser: polls only the cached snapshot every **30 seconds**, pauses while hidden.
 - Storage: atomic JSON snapshots; failures preserve last known data with explicit age and degraded status.
-- Classification: editable accent-insensitive terms in `config/detection.json`; high confidence, probable winter, curated. High confidence is still a heuristic, not independently verified.
+- Classification: weighted, explainable Christmas signals from name, tags, optional description and map. `config/christmas-maps.json` distinguishes verified strong and probable maps; generic snow alone is insufficient. Curated inclusion stays separate. High confidence remains a heuristic.
 - Location: optional local GeoLite2 City MMDB, or explicitly trusted Cloudflare country headers; precise browser coordinates are never uploaded.
 
 API: `GET /api/servers`, `GET /api/health`, `GET /api/ready`. Optional token-protected `POST /api/admin/refresh` accepts no body and has a one-minute cooldown. No public querying or scan endpoint.
