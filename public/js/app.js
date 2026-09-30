@@ -2,8 +2,9 @@ import { rankServers } from './ranking.js';
 import { serverCard, element } from './render.js';
 import { countryFilterState, filterServers } from './filters.js';
 import { isFavorite, toggleServerFavorite } from './favorites.js';
+import { applyInitialCountry, snapshotNotice } from './view-state.js';
 const $ = id => document.getElementById(id);
-let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
+let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer; let countryDefaultApplied = false;
 try { const saved = JSON.parse(localStorage.getItem('christmasdust.favorites') || '[]'); if (Array.isArray(saved)) favoriteIds = new Set(saved.filter(v => typeof v === 'string').slice(0, 5000)); } catch { /* Storage is optional. */ }
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3000); }
 function toggleFavorite(server) {
@@ -43,14 +44,11 @@ async function poll() {
     snapshot = next;
     const countries = countryFilterState(snapshot.servers, snapshot.meta.serverGeoipConfigured);
     options('country', countries.choices, countries.disabled ? 'Countries unavailable' : 'All countries');
+    countryDefaultApplied = applyInitialCountry($('country'), snapshot.visitor.countryCode, countries.choices, countryDefaultApplied);
     $('country').disabled = countries.disabled;
     $('country-status').textContent = countries.message;
     options('map', [...new Set(snapshot.servers.filter(s => s.stale !== true).map(s => s.map).filter(Boolean))].sort().map(s => [s, s]), 'All maps');
-    const messages = [];
-    if (snapshot.meta.stale) messages.push('The snapshot is stale. Waiting for fresh server data.');
-    else if (snapshot.meta.degraded) messages.push('Some servers or discovery sources did not respond. Last known details are retained.');
-    if (snapshot.meta.discoveryDisabled && !snapshot.servers.length) messages.push('Discovery is not configured. The operator can add a Steam API key or curated servers.');
-    $('status').textContent = messages.join(' ');
+    $('status').textContent = snapshotNotice(snapshot.meta, snapshot.servers.length > 0);
     $('version').textContent = `v${snapshot.version}`;
     if (!location) $('location-status').textContent = snapshot.visitor.countryCode ? `Servers in ${snapshot.visitor.countryCode} are preferred. Use your location for approximate distance; coordinates stay in this browser.` : $('country').disabled ? 'Server locations are unavailable. Your coordinates stay in this browser if you choose Use my location.' : 'Choose a country to filter, or use your location for approximate distance. Coordinates stay in this browser.';
     if (!$('servers').contains(document.activeElement) && !$('servers').querySelector('details[open]')) render();
