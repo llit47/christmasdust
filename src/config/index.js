@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 import { parseAddress } from '../utils/address.js';
+import { migrateDetection } from './detection.js';
 export function readConfig(env = process.env) {
   const number = (key, fallback, min, max) => {
     const raw = env[key] ?? String(fallback);
@@ -37,11 +38,18 @@ export function readConfig(env = process.env) {
   if (cfg.staleAfter < cfg.liveInterval) throw new Error('STALE_AFTER_MS must be >= LIVE_INTERVAL_MS');
   return cfg;
 }
-export async function loadDetection(path) {
-  const value = JSON.parse(await readFile(path, 'utf8'));
-  for (const key of ['strong', 'weak', 'include', 'exclude']) {
-    if (!Array.isArray(value[key]) || value[key].length > 1000 || value[key].some(v => typeof v !== 'string' || !v.trim() || v.length > 100)) throw new Error(`Invalid detection ${key}`);
+export async function loadDetection(path, mapPath = new URL('../../config/christmas-maps.json', import.meta.url)) {
+  const { config: value } = migrateDetection(JSON.parse(await readFile(path, 'utf8')));
+  const catalog = JSON.parse(await readFile(mapPath, 'utf8'));
+  if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog) ||
+    Object.keys(catalog).sort().join(',') !== 'probable,strong') throw new Error('Invalid Christmas map catalog keys');
+  const names = new Set();
+  for (const kind of ['strong', 'probable']) {
+    if (!Array.isArray(catalog[kind]) || catalog[kind].length > 100 || catalog[kind].some(name => {
+      if (typeof name !== 'string' || !/^[a-z0-9_]{3,32}$/.test(name) || names.has(name)) return true;
+      names.add(name); return false;
+    })) throw new Error(`Invalid Christmas map catalog ${kind}`);
   }
-  for (const key of Object.keys(value)) if (!['strong', 'weak', 'include', 'exclude'].includes(key)) throw new Error(`Unknown detection key: ${key}`);
-  return { ...value, include: value.include.map(parseAddress), exclude: new Set(value.exclude.map(v => parseAddress(v).id)) };
+  return { ...value, related: value.related ?? [], maps: { strong: new Set(catalog.strong), probable: new Set(catalog.probable) },
+    include: value.include.map(parseAddress), exclude: new Set(value.exclude.map(v => parseAddress(v).id)) };
 }

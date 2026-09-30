@@ -245,7 +245,8 @@ test('disabled and truncated discovery are explicit', async () => {
   assert.equal(result.partial, true);
 });
 test('targeted term selection reuses safe configured terms with a fixed request cap', () => {
-  assert.deepEqual(targetedTerms({ strong: ['Xmas', 'Święta', 'xmas', 'winter\\region\\0', '*'], weak: ['snow', 'snowy'] }), ['xmas', 'swieta', 'snow', 'snowy']);
+  assert.deepEqual(targetedTerms({ strong: ['Xmas', 'Święta', 'xmas', 'winter\\region\\0', '*'], related: ['santa'], weak: ['snow', 'snowy'] }), ['xmas', 'swieta', 'santa']);
+  assert.deepEqual(targetedTerms(rules, 5), ['christmas', 'xmas', 'noel', 'weihnacht', 'swieta']);
   assert.equal(targetedTerms({ strong: Array.from({ length: 20 }, (_, i) => `term${i}`), weak: [] }).length, 8);
 });
 test('broad and targeted discovery merge safely despite a targeted failure', async () => {
@@ -271,11 +272,59 @@ test('broad and targeted discovery merge safely despite a targeted failure', asy
   assert.deepEqual(result.servers.map(row => row.id).sort(), [a.id, niche.id].sort());
   assert.equal(result.servers.find(row => row.id === a.id).tags, 'xmas,secure');
   assert.equal(result.servers.find(row => row.id === niche.id).maxPlayers, 32);
-  assert.equal(result.partial, true); assert.equal(result.successfulRequests, 10);
-  assert.equal(filters.length, 11); assert.equal(peak, 2);
+  assert.equal(result.partial, true); assert.equal(result.successfulRequests, 9);
+  assert.equal(filters.length, 10); assert.equal(peak, 2);
   assert.ok(filters.every(filter => filter.startsWith('\\appid\\10\\gamedir\\cstrike\\')));
   assert.deepEqual(filters.filter(filter => filter.includes('name_match')).sort(),
-    ['\\appid\\10\\gamedir\\cstrike\\name_match\\*xmas*', '\\appid\\10\\gamedir\\cstrike\\name_match\\*santa*', '\\appid\\10\\gamedir\\cstrike\\name_match\\*snow*'].sort());
+    ['\\appid\\10\\gamedir\\cstrike\\name_match\\*xmas*', '\\appid\\10\\gamedir\\cstrike\\name_match\\*santa*'].sort());
+});
+test('exact Christmas map search finds a generic hostname and merges duplicate sources', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const filters = [];
+  const discover = steamDiscovery(config, rules, async url => {
+    const filter = url.searchParams.get('filter'); filters.push(filter);
+    const rows = filter.endsWith('region\\0') || filter.endsWith('map\\de_dust2_xmas')
+      ? [{ addr: a.id, appid: 10, gamedir: 'cstrike', name: 'Public CS Server #4', map: 'de_dust2_xmas' }] : [];
+    return new Response(JSON.stringify({ response: { servers: rows } }));
+  });
+  const result = await discover();
+  assert.equal(result.servers.length, 1);
+  assert.deepEqual(result.servers[0].discoverySources, ['regional', 'map:de_dust2_xmas']);
+  assert.ok(filters.includes('\\appid\\10\\gamedir\\cstrike\\map\\de_dust2_xmas'));
+  assert.ok(filters.length <= 18);
+  const { monitor } = fixture({ discover });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.snapshot().servers.length, 1);
+  assert.equal(monitor.snapshot().servers[0].classification.confidence, 'high');
+  assert.equal(Object.hasOwn(monitor.snapshot().servers[0], 'discoverySources'), false);
+});
+test('multiple targeted searches return one logical endpoint', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const discover = steamDiscovery(config, rules, async url => {
+    const filter = url.searchParams.get('filter');
+    const rows = filter.endsWith('map\\de_dust2_xmas') || filter.includes('name_match\\*christmas*')
+      ? [{ addr: a.id, appid: 10, gamedir: 'cstrike', name: 'Christmas Public', map: 'de_dust2_xmas' }] : [];
+    return new Response(JSON.stringify({ response: { servers: rows } }));
+  });
+  const result = await discover();
+  assert.equal(result.servers.length, 1);
+  assert.deepEqual(result.servers[0].discoverySources, ['map:de_dust2_xmas', 'name:christmas']);
+});
+test('restored generic snow snapshot is reclassified before serving', async () => {
+  const saved = { schema: 1, state: {}, servers: [{ ...a, name: 'Public Deathmatch', map: 'fy_snow',
+    classification: { confidence: 'probable', reasons: ['map: snow'] }, discoveredAt: 1000000 }] };
+  const { monitor } = fixture({ store: { load: async () => saved, save: async () => {} } });
+  await monitor.init();
+  assert.equal(monitor.servers.has(a.id), false);
+  assert.equal(monitor.snapshot().servers.length, 0);
+});
+test('restore preserves an already hidden candidate and its retirement grace', async () => {
+  const hidden = { ...a, name: 'Public Server', map: 'de_dust2',
+    classification: { confidence: 'none', reasons: [] }, themeMisses: 1, discoveredAt: 1000000 };
+  const { monitor } = fixture({ store: { load: async () => ({ schema: 1, state: {}, servers: [hidden] }), save: async () => {} } });
+  await monitor.init();
+  assert.equal(monitor.servers.get(a.id).themeMisses, 1);
+  assert.equal(monitor.snapshot().servers.length, 0);
 });
 test('a targeted result cap marks discovery partial while preserving broad results', async () => {
   const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32), DISCOVERY_LIMIT: '1' });

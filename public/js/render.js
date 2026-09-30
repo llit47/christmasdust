@@ -25,7 +25,7 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   sub.append(e('span', `${flag(server.countryCode)} ${server.country || server.countryCode || 'Location unknown'}`), e('span', server.map || 'Map unknown'));
   const tags = e('div', undefined, 'tags');
   const status = server.stale ? 'Stale status' : server.status === 'online' ? 'Online' : server.status === 'offline' ? 'Unreachable' : 'Unverified';
-  tags.append(e('span', status, server.status === 'online' && !server.stale ? 'tag online' : 'tag'), e('span', { high: 'Christmas · high confidence', probable: 'Winter · probable', curated: 'Curated' }[server.classification.confidence] || 'Unclassified', 'tag'));
+  tags.append(e('span', status, server.status === 'online' && !server.stale ? 'tag online' : 'tag'), e('span', { high: 'Christmas · high confidence', probable: 'Christmas · probable', curated: 'Curated' }[server.classification.confidence] || 'Unclassified', 'tag'));
   if (server.password) tags.append(e('span', 'Password required', 'tag'));
   const population = e('div', undefined, 'population');
   population.append(e('strong', `${server.players} / ${server.maxPlayers}`), e('span', `${Math.max(0, server.maxPlayers - server.players)} open slots${server.stale || server.status !== 'online' ? ' · last known' : ''}`));

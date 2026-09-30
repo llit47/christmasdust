@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readConfig, loadDetection } from '../src/config/index.js';
 import { parseAddress, deduplicate } from '../src/utils/address.js';
 import { classify } from '../src/domain/classify.js';
@@ -27,10 +30,51 @@ test('address normalization, invalid endpoints and private network denial', () =
 });
 test('explainable multilingual confidence and curation', () => {
   for (const name of ['Christmas', 'XMAS', 'Święta', 'Noël', 'Weihnachten']) assert.equal(classify({ name }, rules).confidence, 'high');
-  assert.equal(classify({ map: 'de_snow' }, rules).confidence, 'probable');
+  assert.equal(classify({ map: 'de_snow' }, rules).confidence, 'none');
   assert.equal(classify({ name: 'classic dust' }, rules).confidence, 'none');
   assert.equal(classify({}, rules, true).confidence, 'curated');
   assert.deepEqual(classify({ map: 'de_xmas' }, rules).reasons, ['map: xmas']);
+});
+test('explicit names and vetted maps provide strong Christmas evidence', () => {
+  const name = classify({ name: '-= Christmas Dust 2 =-', map: 'de_dust2' }, rules);
+  assert.equal(name.confidence, 'high'); assert.ok(name.score >= 7);
+  const map = classify({ name: 'Public CS Server #4', map: 'de_dust2_xmas' }, rules);
+  assert.equal(map.confidence, 'high');
+  assert.equal(map.score, 12);
+  assert.ok(map.signals.some(signal => signal.kind === 'known-strong-map'));
+  assert.equal(classify({ name: 'Public', map: 'custom_xmas_2026' }, rules).confidence, 'high');
+});
+test('probable map needs corroboration and generic snow cannot qualify alone', () => {
+  const probable = classify({ name: 'Winter Holiday Server', map: 'deathrun_jinglebells' }, rules);
+  assert.equal(probable.confidence, 'probable');
+  assert.ok(probable.signals.some(signal => signal.kind === 'known-probable-map'));
+  assert.equal(classify({ name: 'Public', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Not Winter', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'No Santa', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Public Deathmatch', map: 'fy_snow' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Snow Arena 24/7', map: 'de_dust2' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'No Christmas', map: 'fy_snow' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Public', map: 'de_dust2', discoverySources: ['name:christmas'] }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Snow Arena', map: 'fy_snow', tags: 'winter', description: 'holiday',
+    discoverySources: ['name:christmas'] }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'Public', map: 'de_dust2', description: 'Christmas event' }, rules).confidence, 'high');
+});
+test('Christmas tokens tolerate separators but reject unrelated substrings', () => {
+  for (const name of ['xmas', 'x-mas', 'x_mas', '[XMAS]', 'christmas_2026'])
+    assert.equal(classify({ name, map: 'de_dust2' }, rules).confidence, 'high', name);
+  for (const name of ['xmassive', 'santamonica', 'snowmobile'])
+    assert.equal(classify({ name, map: 'de_dust2' }, rules).confidence, 'none', name);
+});
+test('map catalog is unique and rejects invalid entries', async t => {
+  const catalog = [...rules.maps.strong, ...rules.maps.probable];
+  assert.equal(new Set(catalog).size, catalog.length);
+  const directory = await mkdtemp(join(tmpdir(), 'christmasdust-maps-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const path = join(directory, 'maps.json');
+  await writeFile(path, JSON.stringify({ strong: ['de_xmas'], probable: ['de_xmas'] }));
+  await assert.rejects(loadDetection(new URL('../config/detection.json', import.meta.url), path), /catalog probable/);
+  await writeFile(path, JSON.stringify({ strong: ['fy_snow\\map\\evil'], probable: [] }));
+  await assert.rejects(loadDetection(new URL('../config/detection.json', import.meta.url), path), /catalog strong/);
 });
 test('deduplication retains latest metadata', () => assert.deepEqual(deduplicate([{ id: 'a', n: 1 }, { id: 'a', n: 2 }, { id: 'b' }]), [{ id: 'a', n: 2 }, { id: 'b' }]));
 test('bounded concurrency isolates failures', async () => {
@@ -47,6 +91,12 @@ test('Haversine and recommendations separate distance from population', () => {
   assert.deepEqual(rankServers(rows, { countryCode: 'GB', location: london }).map(s => s.id), ['c', 'b', 'a']);
   assert.equal(rankServers(rows, { sort: 'players' })[0].id, 'a');
   assert.equal(rankServers(rows, { location: paris, sort: 'proximity' })[0].id, 'a');
+});
+test('recommended ranking prefers Christmas relevance before country and proximity', () => {
+  const probable = { id: 'a', countryCode: 'GB', classification: { confidence: 'probable', score: 7 } };
+  const high = { id: 'b', countryCode: 'FR', classification: { confidence: 'high', score: 9 } };
+  const curated = { id: 'c', countryCode: 'GB', classification: { confidence: 'curated', score: 0 } };
+  assert.deepEqual(rankServers([probable, curated, high], { countryCode: 'GB' }).map(row => row.id), ['b', 'c', 'a']);
 });
 test('external strings are assigned as text and cannot become links', () => {
   const hostile = '<img src=x onerror=alert(1)>';

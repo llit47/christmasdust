@@ -11,7 +11,18 @@ export class Monitor {
   async init() {
     try {
       const saved = await this.store.load();
-      if (saved) { Object.assign(this.state, saved.state); for (const row of saved.servers) if (!this.rules.exclude.has(row.id)) this.servers.set(row.id, row); }
+      if (saved) {
+        Object.assign(this.state, saved.state);
+        for (const row of saved.servers) {
+          if (this.rules.exclude.has(row.id)) continue;
+          if (row.classification?.confidence === 'none') { this.servers.set(row.id, row); continue; }
+          const classification = classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription,
+            discoverySources: row.discoverySources }, this.rules, row.curated);
+          // Apply updated relevance rules to complete restored metadata immediately.
+          if (classification.confidence === 'none' && cleanText(row.name).trim() && cleanText(row.map).trim()) continue;
+          this.servers.set(row.id, { ...row, classification: classification.confidence === 'none' ? row.classification : classification });
+        }
+      }
     } catch { this.log.warn('Snapshot restore failed; starting with configured seeds'); this.state.persistenceError = true; }
     this.prune();
     for (const row of this.rules.include) this.add(row, true);
@@ -37,12 +48,15 @@ export class Monitor {
     if (this.rules.exclude.has(address.id)) return;
     const previous = this.servers.get(address.id);
     const discoveryTags = typeof raw.tags === 'string' ? cleanText(raw.tags) : previous?.discoveryTags;
-    const { retire, ...theme } = this.themeObservation({ ...raw, tags: discoveryTags }, previous, curated);
+    const discoveryDescription = typeof raw.description === 'string' ? cleanText(raw.description) : previous?.discoveryDescription;
+    const discoverySources = Array.isArray(raw.discoverySources) ? raw.discoverySources : previous?.discoverySources;
+    const { retire, ...theme } = this.themeObservation({ ...raw, tags: discoveryTags, description: discoveryDescription,
+      discoverySources }, previous, curated);
     if (retire) { this.servers.delete(address.id); return; }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
     // Discovery metadata must not overwrite a trustworthy live response.
     this.servers.set(address.id, { ...metadata(raw), ...address, ...this.geoip(address.ip), status: 'unknown', misses: 0,
-      lastSeenAt: null, lastQueryAt: null, ...previous, discoveryTags, ...theme,
+      lastSeenAt: null, lastQueryAt: null, ...previous, discoveryTags, discoveryDescription, discoverySources, ...theme,
       discoveredAt: theme.classification.confidence === 'none' ? previous.discoveredAt : this.now(), curated });
   }
   prune() {
@@ -51,7 +65,8 @@ export class Monitor {
       const lastThemeMatch = row.lastThemeMatchAt ?? Math.max(row.lastSeenAt || 0, row.discoveredAt || 0);
       if (this.rules.exclude.has(id) || (!included.has(id) && (this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention ||
         (row.classification.confidence === 'none' && this.now() - lastThemeMatch > this.config.retention)))) this.servers.delete(id);
-      else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify({ ...row, tags: row.discoveryTags }, this.rules); }
+      else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify({ ...row, tags: row.discoveryTags,
+        description: row.discoveryDescription, discoverySources: row.discoverySources }, this.rules); }
     }
     const capacity = Math.max(this.config.maxServers, included.size);
     const removable = [...this.servers.values()].filter(row => !included.has(row.id))
@@ -77,7 +92,9 @@ export class Monitor {
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
           return { ...row, ...liveMetadata(raw), ...this.geoip(row.ip),
-            ...this.themeObservation({ ...raw, tags: row.discoveryTags }, row, row.curated),
+            ...this.themeObservation({ ...raw, tags: row.discoveryTags,
+              description: typeof raw.description === 'string' ? raw.description : row.discoveryDescription,
+              discoverySources: row.discoverySources }, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
         let successes = 0;
@@ -106,7 +123,7 @@ export class Monitor {
   }
   snapshot() {
     const age = this.state.lastLiveAt === null ? null : Math.max(0, this.now() - this.state.lastLiveAt);
-    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, ...row }) => ({ ...row,
+    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' })),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,

@@ -11,10 +11,12 @@ export function rankServers(servers, { countryCode, location, sort = 'recommende
   const distance = row => haversine(location, row);
   const difference = (a, b) => a === b ? 0 : a < b ? -1 : 1;
   const available = row => row.status === 'online' && !row.stale && row.players < row.maxPlayers && !row.password;
+  const relevance = row => ({ high: 3, curated: 2, probable: 1 })[row.classification?.confidence] || 0;
   return [...servers].sort((a, b) => {
     if (sort === 'players') return b.players - a.players || a.id.localeCompare(b.id);
     if (sort === 'proximity') return difference(distance(a), distance(b)) || a.id.localeCompare(b.id);
-    return Number(Boolean(countryCode) && b.countryCode === countryCode) - Number(Boolean(countryCode) && a.countryCode === countryCode) ||
+    return relevance(b) - relevance(a) || (b.classification?.score || 0) - (a.classification?.score || 0) ||
+      Number(Boolean(countryCode) && b.countryCode === countryCode) - Number(Boolean(countryCode) && a.countryCode === countryCode) ||
       difference(distance(a), distance(b)) || Number(b.status === 'online' && !b.stale) - Number(a.status === 'online' && !a.stale) ||
       Number(available(b)) - Number(available(a)) || b.players - a.players || a.id.localeCompare(b.id);
   });

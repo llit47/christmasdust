@@ -12,7 +12,7 @@ less install.sh
 sudo bash install.sh
 ```
 
-Until this PR is released, replace `main` with `feat/initial-mvp` in the URL and run `sudo env CHRISTMASDUST_CHANNEL=feat/initial-mvp bash install.sh`. The environment variable selects a trusted Git branch or tag; it is the installer's only configuration override. Installation is noninteractive. Existing installations invoke the updater; existing environment/detection files are preserved. A preprovisioned environment file should be root:christmasdust 0640 and use the standard snapshot path for automatic snapshot rollback.
+The environment variable `CHRISTMASDUST_CHANNEL` selects a trusted Git branch or tag; it is the installer's only configuration override. Installation is noninteractive. Existing installations invoke the updater; it preserves the environment file and migrates supported legacy detection files transactionally. A preprovisioned environment file should be root:christmasdust 0640 and use the standard snapshot path for automatic snapshot rollback.
 
 The installer installs OS prerequisites, downloads the latest official Node 24 LTS binary into `/opt/christmasdust/node`, verifies its SHA256 against the official HTTPS manifest, creates the service user, and installs:
 
