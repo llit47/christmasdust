@@ -12,7 +12,7 @@ export function connection(id) {
   return { url: `steam://connect/${id}`, command: `connect ${id}` };
 }
 export function flag(code) { return /^[A-Z]{2}$/.test(code ?? '') ? [...code].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('') : '◈'; }
-export function serverCard(document, server, { location, favorite, toggleFavorite, copy }) {
+export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy }) {
   const e = (tag, text, cls) => element(document, tag, text, cls);
   const card = e('article', undefined, 'server');
   const title = e('div', undefined, 'server-title');
@@ -35,7 +35,8 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   const { url, command } = connection(server.id);
   const join = e('a', 'Connect ↗', 'button primary'); join.href = url;
   const copyButton = e('button', 'Copy command', 'button'); copyButton.type = 'button'; copyButton.addEventListener('click', () => copy(command));
-  actions.append(join, copyButton);
+  const hideButton = e('button', 'Hide', 'button hide-action'); hideButton.type = 'button'; hideButton.setAttribute('aria-label', `Hide ${server.name || server.id}`); hideButton.addEventListener('click', () => hide(server));
+  actions.append(join, copyButton, hideButton);
   const info = e('div', undefined, 'server-info'); info.append(title, sub, tags);
   card.append(info, population, actions);
   return card;

@@ -32,7 +32,7 @@ test('server snapshot reports whether server GeoIP is configured without visitor
 });
 test('health and readiness work independently of upstream freshness', async t => {
   const { get, monitor } = await fixture(t); assert.equal((await get('/api/ready')).status, 200);
-  const body = await (await get('/api/health')).json(); assert.equal(body.version, '0.1.0'); assert.equal(body.stale, true);
+  const body = await (await get('/api/health')).json(); assert.equal(body.version, '0.2.0'); assert.equal(body.stale, true);
   monitor.ready = false; assert.equal((await get('/api/ready')).status, 503);
 });
 test('Cloudflare headers require explicitly trusted immediate proxy', async t => {
