@@ -21,13 +21,26 @@ chown christmasdust:christmasdust "$stage"
 switched=false
 snapshot_backup=$(mktemp -d /var/lib/christmasdust-update.XXXXXXXX)
 snapshot_state=unrecorded
-cleanup() { rm -rf -- "$stage" "$snapshot_backup"; }
+config_backup=$(mktemp -d "$CONFIG/.detection-update.XXXXXXXX")
+config_candidate=$(mktemp "$CONFIG/.detection-candidate.XXXXXXXX")
+config_restore=
+config_switched=false
+cleanup() {
+  rm -rf -- "$stage" "$snapshot_backup" "$config_backup"
+  rm -f -- "$config_candidate"
+  if [[ -n $config_restore ]]; then rm -f -- "$config_restore"; fi
+}
 rollback() {
   local result=$?
   trap - ERR INT TERM
   if [[ $switched == true && -n $previous && -d $previous ]]; then
-    echo 'Update failed; restoring previous application and snapshot.' >&2
+    echo 'Update failed; restoring previous application, configuration and snapshot.' >&2
     systemctl stop christmasdust || true
+    if [[ $config_switched == true ]]; then
+      config_restore=$(mktemp "$CONFIG/.detection-restore.XXXXXXXX")
+      cp -p "$config_backup/detection.json" "$config_restore"
+      mv -Tf "$config_restore" "$CONFIG/detection.json"
+    fi
     ln -s "$previous" "$ROOT/rollback-link"
     mv -Tf "$ROOT/rollback-link" "$ROOT/current"
     if [[ $snapshot_state == present ]]; then
@@ -67,11 +80,27 @@ printf '%s\n' "$revision" > "$stage/app/REVISION"
 # No lifecycle scripts execute during deployment; the app has no build step.
 (cd "$stage/app" && runuser -u christmasdust -- npm ci --omit=dev --ignore-scripts --cache "$stage/npm-cache")
 (cd "$stage/app" && runuser -u christmasdust -- npm test && runuser -u christmasdust -- npm run check)
-# Validate the operator configuration before touching the running release.
+# Generate with the unprivileged service user; root copies into a protected
+# candidate beside the live file before staged-release validation.
+cp -p "$CONFIG/detection.json" "$config_backup/detection.json"
+cp "$config_backup/detection.json" "$stage/detection-source.json"
+chown christmasdust:christmasdust "$stage/detection-source.json"
+chmod 0600 "$stage/detection-source.json"
+migration_state=$(cd "$stage/app" && runuser -u christmasdust -- "$NODE" scripts/migrate-detection.js "$stage/detection-source.json" "$stage/detection-candidate.json")
+detection_validation_path="$CONFIG/detection.json"
+if [[ $migration_state == migrated ]]; then
+  cp "$stage/detection-candidate.json" "$config_candidate"
+  chown --reference="$config_backup/detection.json" "$config_candidate"
+  chmod --reference="$config_backup/detection.json" "$config_candidate"
+  detection_validation_path="$config_candidate"
+elif [[ $migration_state != current ]]; then
+  echo 'Unexpected detection migration result' >&2; exit 1
+fi
 (cd "$stage/app" && runuser -u christmasdust -- "$NODE" --env-file="$CONFIG/christmasdust.env" --input-type=module -e '
   import {readConfig,loadDetection} from "./src/config/index.js";
   import {loadGeoip} from "./src/services/geoip.js";
-  const c=readConfig(); await loadDetection(c.detectionPath); await loadGeoip(c.geoipPath);')
+  const c=readConfig(); await loadDetection(process.argv[1]); await loadGeoip(c.geoipPath);' \
+  "$detection_validation_path")
 release="$ROOT/releases/$(date -u +%Y%m%dT%H%M%S)-${revision:0:12}"
 [[ ! -e $release ]]
 mv "$stage/app" "$release"
@@ -85,8 +114,16 @@ if [[ -f /var/lib/christmasdust/snapshot.json ]]; then
 else
   snapshot_state=absent
 fi
+if [[ $migration_state == migrated ]] && ! cmp -s "$config_backup/detection.json" "$CONFIG/detection.json"; then
+  echo 'Detection configuration changed during update; retrying is safe.' >&2
+  false
+fi
 ln -s "$release" "$ROOT/next-link"
 mv -Tf "$ROOT/next-link" "$ROOT/current"
+if [[ $migration_state == migrated ]]; then
+  config_switched=true
+  mv -Tf "$config_candidate" "$CONFIG/detection.json"
+fi
 systemctl reset-failed christmasdust || true
 systemctl start christmasdust
 health

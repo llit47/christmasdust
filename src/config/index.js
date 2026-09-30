@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { resolve } from 'node:path';
 import { parseAddress } from '../utils/address.js';
+import { migrateDetection } from './detection.js';
 export function readConfig(env = process.env) {
   const number = (key, fallback, min, max) => {
     const raw = env[key] ?? String(fallback);
@@ -38,12 +39,7 @@ export function readConfig(env = process.env) {
   return cfg;
 }
 export async function loadDetection(path, mapPath = new URL('../../config/christmas-maps.json', import.meta.url)) {
-  const value = JSON.parse(await readFile(path, 'utf8'));
-  for (const key of ['strong', 'weak', 'include', 'exclude']) {
-    if (!Array.isArray(value[key]) || value[key].length > 1000 || value[key].some(v => typeof v !== 'string' || !v.trim() || v.length > 100)) throw new Error(`Invalid detection ${key}`);
-  }
-  if (value.related !== undefined && (!Array.isArray(value.related) || value.related.length > 1000 || value.related.some(v => typeof v !== 'string' || !v.trim() || v.length > 100))) throw new Error('Invalid detection related');
-  for (const key of Object.keys(value)) if (!['strong', 'related', 'weak', 'include', 'exclude'].includes(key)) throw new Error(`Unknown detection key: ${key}`);
+  const { config: value } = migrateDetection(JSON.parse(await readFile(path, 'utf8')));
   const catalog = JSON.parse(await readFile(mapPath, 'utf8'));
   if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog) ||
     Object.keys(catalog).sort().join(',') !== 'probable,strong') throw new Error('Invalid Christmas map catalog keys');

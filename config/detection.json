@@ -1,4 +1,5 @@
 {
+  "version": 2,
   "strong": ["christmas", "xmas", "noel", "weihnacht", "weihnachten", "swieta"],
   "related": ["santa", "jinglebells"],
   "weak": ["winter", "snow", "snowy", "holiday", "ice", "frozen"],

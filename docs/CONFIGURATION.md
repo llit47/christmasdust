@@ -31,10 +31,11 @@ No precise visitor coordinates are accepted by any API. The frontend sends only 
 
 Get a [Steam Web API key](https://steamcommunity.com/dev/apikey). The public adapter calls `https://api.steampowered.com/IGameServersService/GetServerList/v1/` with `\appid\10\gamedir\cstrike\region\N` for eight broad regions and up to ten targeted filters: five exact catalog maps at most, then distinct safe ASCII name terms of 4–32 characters from `strong` and `related`. These fixed-origin requests run at concurrency two with a 16 MB limit per response; no key or seed mode means no Steam requests. Generic weak terms are not queried. The subset and result caps cannot find every server. It does not use the publisher-only `ISteamApps/GetServerList` endpoint. The exact-map filter is supported by Steam's server browser API, but its behavior through this Web API endpoint remains unverified with a live key. Valve may change access policies or omit servers. HTTP failures appear as degraded discovery and never clear existing data. API keys must not be placed in frontend code or access-log URLs.
 
-Detection configuration uses four required arrays and an optional `related` array (older operator files remain valid):
+Detection configuration is schema version 2. The runtime accepts unversioned legacy files in memory; the native updater migrates them on disk without a prompt:
 
 ```json
 {
+  "version": 2,
   "strong": ["christmas", "xmas", "noel", "weihnacht", "weihnachten", "swieta"],
   "related": ["santa", "jinglebells"],
   "weak": ["winter", "snow", "snowy", "holiday", "ice", "frozen"],
@@ -45,7 +46,9 @@ Detection configuration uses four required arrays and an optional `related` arra
 
 The address above illustrates syntax only; it is **not** a game server recommendation. Use actual servers you want to curate. Public literal IPv4 only, explicit port. Private, loopback, link-local, multicast, documentation and shared-address ranges are rejected. Steam Networking / FakeIP servers need a different Steam resolution/query path and are intentionally unsupported; ordinary GameDig UDP queries are not sent to them. No DNS names or arbitrary visitor-supplied endpoints. Exclusion wins. Includes bypass theme detection and are labelled curated. Terms match normalized whole tokens or token phrases, not arbitrary substrings or executable regular expressions. Strong Christmas identity and known strong maps qualify independently; probable maps require a second signal; generic seasonal terms alone cannot qualify. The bundled `config/christmas-maps.json` catalog has validated, unique `strong` and `probable` map IDs. Add only verified CS 1.6 maps there and redeploy; native updates replace this bundled catalog but preserve the operator detection file. Each detection array supports up to 1000 entries. No regex backtracking risk.
 
-Existing native installations retain their `/etc/christmasdust/detection.json`; review its term arrays manually to adopt the new default `related`/`weak` split. The map catalog is bundled with each release.
+An unattended update migrates supported unversioned files to version 2, preserving includes, excludes and custom terms while moving the old built-in `santa` term to `related` and adding this release's new terms. Already-versioned files are not rewritten. Unsupported future versions and unknown keys fail validation. The updater restores the exact previous file if deployment fails; operators normally need no manual edit after updating. The map catalog is bundled with each release.
+
+An already-installed updater from before version 2 cannot retroactively perform the new disk migration during its first upgrade. The new application applies version 2 semantics to the untouched legacy file in memory, so the first upgrade works without editing it; the newly installed updater writes version 2 on its next run. This keeps the first upgrade safe for rollback to the old release.
 
 ## GeoIP and proxy trust
 

@@ -17,7 +17,7 @@ Review downloaded scripts before running as root if preferred. Requires Debian/U
 **Before servers appear:** add a Steam Web API key to `/etc/christmasdust/christmasdust.env`, or curated public `IP:PORT` addresses to the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust`. No sample or invented servers are shown to players. GeoIP is optional.
 
 ```sh
-sudo christmasdust update          # preserves config/data; health failure rolls back
+sudo christmasdust update          # migrates legacy detection config; failure rolls back
 christmasdust version
 sudo journalctl -u christmasdust -f
 ```

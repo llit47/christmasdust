@@ -11,6 +11,8 @@ Steam Networking / FakeIP endpoints are unsupported. They require a distinct Ste
 
 Snapshots use a versioned schema, temporary file, fsync, atomic rename and directory fsync. Startup restores the last snapshot before accepting traffic. Memory can continue serving if disk persistence fails, with degraded health. Readiness means initialization completed; freshness is reported separately so an upstream outage does not cause restart loops.
 
+Detection config is versioned independently. Runtime loading can interpret the supported unversioned legacy schema without rewriting it. Native updates use the staged release to create and validate a version 2 candidate, then atomically replace the operator file only during deployment. Failed deployment restores the exact old file before the previous release restarts.
+
 Visitor country comes from a local MMDB lookup or an explicitly trusted proxy's sanitized CF-IPCountry. The API never returns visitor coordinates. The opt-in browser geolocation result remains in memory; Haversine distance is computed locally. Recommendation orders Christmas relevance first, then same-country, geographic distance when available, online state, available slots and population. Distance is approximate and never network ping. GameDig latency is the monitor-to-server query latency.
 
 External adapters (discovery, query, GeoIP), storage and clock are injected for offline tests. The frontend uses text nodes for external metadata and builds Steam links only from validated endpoints.
