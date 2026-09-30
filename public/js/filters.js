@@ -1,4 +1,5 @@
 import { isFavorite } from './favorites.js';
+import { isHidden } from './hidden.js';
 
 export function countryOptions(servers) {
   return [...new Map(servers.filter(row => row.stale !== true && /^[A-Z]{2}$/.test(row.countryCode ?? ''))
@@ -12,11 +13,12 @@ export function countryFilterState(servers, configured) {
     ? 'No server countries in this snapshot yet.' : 'Server country filtering unavailable: GeoIP is not configured.' };
 }
 
-export function filterServers(servers, filters, favoriteIds) {
+export function filterServers(servers, filters, favoriteIds, hiddenIds = new Set()) {
   const query = filters.search.trim().toLowerCase();
   return servers.filter(row =>
     row.status === 'online' &&
     row.stale !== true &&
+    !isHidden(row, hiddenIds) &&
     (!query || `${row.name} ${row.map} ${row.id}`.toLowerCase().includes(query)) &&
     (!filters.country || row.countryCode === filters.country) &&
     (!filters.map || row.map === filters.map) &&

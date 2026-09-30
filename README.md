@@ -2,7 +2,7 @@
 
 **A little snow. A lot of Counter-Strike.** A fast, self-hosted browser for Christmas-themed Counter-Strike 1.6 servers.
 
-A dark winter page opens straight into a server list: country, map, population, confidence, Steam connect and copy command. Filter by country, map, open slots and theme confidence; save favorites locally. Optional location ranks approximate distances entirely in the browser. No account, tracking, frontend framework or database.
+A dark winter page opens straight into a server list: country, map, population, confidence, Steam connect and copy command. Filter by country, map, open slots and theme confidence; browser preferences, favorites and personally hidden servers stay in local storage. Optional location ranks approximate distances entirely in the browser. No account, tracking, frontend framework or database.
 
 **Monitor latency is not your ping.** GameDig measures from the backend to the game server. Recommendations use country and optional geographic distance, never a fabricated visitor ping.
 

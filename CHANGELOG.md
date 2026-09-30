@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.2.0 — Unreleased
+
+- Persist browser search, filters, and sort preferences locally, with safe fallback when server options change.
+- Add personal Hidden servers with endpoint-aware grouping and restore controls; favorites remain independent.
+- Keep the compact browser focused on online, fresh servers, with manual country filtering, optional local distance sorting, and last-update time.
+
+## 0.1.0
 
 Initial Christmas server browser: Steam discovery, GameDig monitoring, resilient snapshots, configurable classification, private location ranking, favorites, native installation and rollback updates.
 

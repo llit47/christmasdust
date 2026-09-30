@@ -4,6 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c171d"><meta name="description" content="Find your next winter round. A fast Christmas and winter Counter-Strike 1.6 server browser.">
   <title>WinterDust — Find your winter server</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css"><script type="module" src="/js/app.js"></script>
 </head>
 <body>
@@ -26,6 +27,7 @@
       <div class="list-heading"><span id="count">Finding your next server…</span><span id="last-update">Updated — · refreshes every 30s</span></div>
       <p id="status" class="notice" role="status">Loading the latest server snapshot…</p>
       <div id="servers" tabindex="-1"></div>
+      <details id="hidden-section" class="hidden-section"><summary id="hidden-summary">Hidden servers (0)</summary><div id="hidden-list" class="hidden-list"></div></details>
       <noscript><p class="notice">Enable JavaScript to browse servers. The read-only snapshot is also available at <a href="/api/servers">/api/servers</a>.</p></noscript>
       <p class="fineprint">Christmas matches are based on server names and maps, or operator curation. Distance is approximate; your in-game ping can differ. Steam and Counter-Strike 1.6 are required to connect.</p>
     </section>

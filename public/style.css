@@ -341,6 +341,34 @@ input[type=checkbox] {
   flex:1;
   min-width:0;
 }
+.server-actions .hide-action {
+  flex:0 0 auto;
+  min-height:32px;
+  padding:5px 8px;
+}
+.hidden-section {
+  margin-top:10px;
+  border-top:1px solid var(--line);
+  padding-top:10px;
+}
+.hidden-section summary {
+  cursor:pointer;
+  color:var(--muted);
+  font-size:12px;
+}
+.hidden-list {
+  display:grid;
+  gap:6px;
+  margin-top:8px;
+}
+.hidden-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:12px;
+  overflow-wrap:anywhere;
+}
 .fineprint {
   max-width:800px;
   margin-top:16px;
