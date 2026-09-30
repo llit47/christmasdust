@@ -1,6 +1,15 @@
 export function applyInitialCountry(select, countryCode, choices, applied) {
-  if (!applied) select.value = choices.some(([code]) => code === countryCode) ? countryCode : '';
+  if (applied) return true;
+  if (!countryCode || !choices.some(([code]) => code === countryCode)) return false;
+  select.value = countryCode;
   return true;
+}
+
+export function lastUpdateLabel(lastLiveAt) {
+  const date = typeof lastLiveAt === 'number' ? new Date(lastLiveAt) : null;
+  const time = date && Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) : '—';
+  return `Updated ${time} · refreshes every 30s`;
 }
 
 export function snapshotNotice(meta, hasServers) {
