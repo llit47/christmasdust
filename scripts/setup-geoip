@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+set +x # Credentials must never appear in shell traces.
+umask 077
+ROOT=/opt/christmasdust
+NODE="$ROOT/node/bin/node"
+export PATH="$ROOT/node/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+HELPER="$ROOT/current/scripts/geoip-files.js"
+ENV_FILE=/etc/christmasdust/christmasdust.env
+DB_DIR=/var/lib/christmasdust/geoip
+DB_FILE="$DB_DIR/GeoLite2-City.mmdb"
+CONF=/etc/GeoIP.conf
+
+[[ $EUID == 0 ]] || { echo 'GeoIP setup requires root.' >&2; exit 1; }
+[[ -r /etc/os-release ]] || { echo 'Debian or Ubuntu is required.' >&2; exit 1; }
+# shellcheck disable=SC1091
+. /etc/os-release
+[[ ${ID:-} == debian || ${ID:-} == ubuntu ]] || { echo 'GeoIP setup supports Debian and Ubuntu native installs only.' >&2; exit 1; }
+[[ -x $NODE && -f $HELPER && -f $ENV_FILE ]] || { echo 'ChristmasDust native installation is incomplete.' >&2; exit 1; }
+getent group christmasdust >/dev/null || { echo 'ChristmasDust service group is missing.' >&2; exit 1; }
+[[ ! -L $DB_DIR && ! -L $CONF && ! -L $ENV_FILE ]] || { echo 'Unexpected configuration symlink.' >&2; exit 1; }
+
+if ! command -v geoipupdate >/dev/null; then
+  echo 'Installing geoipupdate...'
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y geoipupdate
+fi
+
+[[ -e /dev/tty ]] || { echo 'An interactive terminal is required for MaxMind credentials.' >&2; exit 1; }
+printf 'MaxMind AccountID: ' >/dev/tty
+IFS= read -r account </dev/tty
+printf 'MaxMind LicenseKey: ' >/dev/tty
+IFS= read -rs license </dev/tty
+printf '\n' >/dev/tty
+[[ $account =~ ^[0-9]+$ && $license =~ ^[A-Za-z0-9_-]+$ ]] || { echo 'Invalid MaxMind credentials.' >&2; exit 1; }
+
+install -d -o root -g christmasdust -m 0750 "$DB_DIR"
+printf '%s\n%s\n' "$account" "$license" | "$NODE" "$HELPER" configure "$CONF" "$DB_DIR"
+unset account license
+echo 'Downloading GeoLite2 City database...'
+if ! geoipupdate -f "$CONF" >/dev/null 2>&1; then
+  echo 'geoipupdate failed; check the MaxMind account, license and network access.' >&2
+  exit 1
+fi
+group_id=$(getent group christmasdust | cut -d: -f3)
+"$NODE" "$HELPER" protect "$DB_FILE" "$group_id"
+runuser -u christmasdust -- "$NODE" --input-type=module -e \
+  'import { loadGeoip } from "/opt/christmasdust/current/src/services/geoip.js"; await loadGeoip(process.argv[1]);' "$DB_FILE"
+
+# The distro timer runs geoipupdate.service. A post-hook fixes replacement-file
+# permissions and restarts the app so its once-opened MMDB handle is refreshed.
+if systemctl cat geoipupdate.service >/dev/null 2>&1; then
+  dropin_dir=/etc/systemd/system/geoipupdate.service.d
+  install -d -o root -g root -m 0755 "$dropin_dir"
+  dropin_tmp=$(mktemp "$dropin_dir/.christmasdust.XXXXXXXX")
+  cat >"$dropin_tmp" <<EOF
+[Service]
+ExecStartPost=+$NODE $HELPER protect $DB_FILE $group_id
+ExecStartPost=+/usr/bin/systemctl try-restart christmasdust.service
+EOF
+  chown root:root "$dropin_tmp"
+  chmod 0644 "$dropin_tmp"
+  mv -f "$dropin_tmp" "$dropin_dir/christmasdust.conf"
+  systemctl daemon-reload
+fi
+
+env_backup=$(mktemp /etc/christmasdust/.christmasdust.env.geoip.XXXXXXXX)
+cp -p "$ENV_FILE" "$env_backup"
+env_changed=false
+restore_environment() {
+  if [[ $env_changed == true ]]; then
+    "$NODE" "$HELPER" restore "$ENV_FILE" "$env_backup" || true
+    systemctl restart christmasdust.service || true
+  fi
+  rm -f "$env_backup"
+}
+trap restore_environment ERR INT TERM
+trap 'rm -f "$env_backup"' EXIT
+"$NODE" "$HELPER" environment "$ENV_FILE" "$DB_FILE"
+env_changed=true
+systemctl restart christmasdust.service
+cd "$ROOT/current"
+endpoint=$("$NODE" --env-file="$ENV_FILE" --input-type=module -e '
+  import { readConfig } from "./src/config/index.js";
+  const { host, port } = readConfig();
+  const target = ["0.0.0.0", "::"].includes(host) ? "127.0.0.1" : host;
+  console.log(`http://${target.includes(":") ? `[${target}]` : target}:${port}/api/ready`);
+')
+healthy=false
+for _ in {1..30}; do
+  if systemctl is-active --quiet christmasdust.service && curl --noproxy '*' -fsS --max-time 2 "$endpoint" >/dev/null 2>&1; then
+    healthy=true
+    break
+  fi
+  sleep 1
+done
+[[ $healthy == true ]] || { echo 'ChristmasDust did not become ready after GeoIP setup.' >&2; false; }
+env_changed=false
+if systemctl cat geoipupdate.timer >/dev/null 2>&1; then
+  systemctl enable --now geoipupdate.timer
+  echo 'Enabled the distro geoipupdate.timer.'
+else
+  echo 'No distro geoipupdate.timer found; arrange database refreshes manually.' >&2
+fi
+echo 'GeoIP configured; ChristmasDust is ready with GeoLite2 City.'

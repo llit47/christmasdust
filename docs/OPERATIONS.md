@@ -7,6 +7,7 @@ curl -fsS http://127.0.0.1:3001/api/health
 curl -fsS http://127.0.0.1:3001/api/ready
 christmasdust version
 sudo christmasdust update
+sudo christmasdust setup-geoip  # optional interactive MaxMind City setup
 sudo christmasdust update v0.1.0    # once that tag exists
 ```
 
