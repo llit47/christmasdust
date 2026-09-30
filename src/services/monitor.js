@@ -15,12 +15,12 @@ export class Monitor {
         Object.assign(this.state, saved.state);
         for (const row of saved.servers) {
           if (this.rules.exclude.has(row.id)) continue;
-          if (row.classification?.confidence === 'none') { this.servers.set(row.id, row); continue; }
+          if (row.classification?.confidence === 'none') { this.servers.set(row.id, { ...row, ...this.geoip(row.ip) }); continue; }
           const classification = classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription,
             discoverySources: row.discoverySources }, this.rules, row.curated);
           // Apply updated relevance rules to complete restored metadata immediately.
           if (classification.confidence === 'none' && cleanText(row.name).trim() && cleanText(row.map).trim()) continue;
-          this.servers.set(row.id, { ...row, classification: classification.confidence === 'none' ? row.classification : classification });
+          this.servers.set(row.id, { ...row, ...this.geoip(row.ip), classification: classification.confidence === 'none' ? row.classification : classification });
         }
       }
     } catch { this.log.warn('Snapshot restore failed; starting with configured seeds'); this.state.persistenceError = true; }
@@ -55,8 +55,8 @@ export class Monitor {
     if (retire) { this.servers.delete(address.id); return; }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
     // Discovery metadata must not overwrite a trustworthy live response.
-    this.servers.set(address.id, { ...metadata(raw), ...address, ...this.geoip(address.ip), status: 'unknown', misses: 0,
-      lastSeenAt: null, lastQueryAt: null, ...previous, discoveryTags, discoveryDescription, discoverySources, ...theme,
+    this.servers.set(address.id, { ...metadata(raw), ...address, status: 'unknown', misses: 0,
+      lastSeenAt: null, lastQueryAt: null, ...previous, ...this.geoip(address.ip), discoveryTags, discoveryDescription, discoverySources, ...theme,
       discoveredAt: theme.classification.confidence === 'none' ? previous.discoveredAt : this.now(), curated });
   }
   prune() {

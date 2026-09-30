@@ -20,7 +20,7 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | DETECTION_PATH | ./config/detection.json | Required classification/include/exclude JSON; native installs require an absolute path |
 | DISCOVERY_MODE | auto | auto uses Steam if key supplied; steam requires key; seeds disables Steam |
 | STEAM_API_KEY | empty | 32-character hexadecimal Steam Web API key; backend only |
-| GEOIP_PATH | empty | Optional local GeoLite2 City/Country MMDB; unreadable configured file fails startup |
+| GEOIP_PATH | empty | Optional local GeoLite2 City MMDB for server country and coordinates; native example: `/var/lib/christmasdust/geoip/GeoLite2-City.mmdb`; unreadable configured file fails startup |
 | TRUSTED_PROXIES | empty | Comma-separated literal IPs/CIDRs trusted for Express forwarded IP handling |
 | TRUST_CF_COUNTRY | false | Accept CF-IPCountry only from a trusted immediate peer; requires trusted proxies |
 | ADMIN_TOKEN | empty | Disables admin API when empty; otherwise at least 32 non-whitespace characters |
@@ -54,7 +54,7 @@ Native updates resolve `DETECTION_PATH` through the staged application config an
 
 ## GeoIP and proxy trust
 
-Use a separately downloaded [MaxMind GeoLite2 City MMDB](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/) for server coordinates and country; Country MMDB supports only country. MaxMind requires an account and license key for downloads. Follow its current EULA, attribution and redistribution terms; no database is bundled. Configure the official `geoipupdate` utility with root-protected credentials and a daily systemd timer. Put the database in `/var/lib/christmasdust/geoip/` (service-readable), set GEOIP_PATH, then restart after database replacement. This app opens the database once per process, and never calls a remote geolocation API.
+Use a separately downloaded [MaxMind GeoLite2 City MMDB](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/) for server coordinates and country; a Country MMDB supplies no coordinates. MaxMind requires an account and license key for downloads. Follow its current EULA, attribution and redistribution terms; no database is bundled. See [native setup](INSTALL.md#server-country-data-optional) for `geoipupdate`, permissions and `GEOIP_PATH`. Restart after database replacement: the app opens it once per process and never calls a remote geolocation API. Without `GEOIP_PATH`, server country filtering is disabled with an explanation in the UI.
 
 GeoIP represents an approximate area, often a population center; accuracyRadiusKm is exposed when available. VPNs, hosting registrations and country centroids can mislead. Country detection alone does not infer a visitor city. MaxMind requires timely database updates/deletion under its terms; operators are responsible for the updater and license compliance.
 

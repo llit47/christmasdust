@@ -9,6 +9,7 @@ import { classify } from '../src/domain/classify.js';
 import { mapLimit } from '../src/utils/concurrency.js';
 import { haversine, rankServers } from '../public/js/ranking.js';
 import { element, connection } from '../public/js/render.js';
+import { countryOptions, countryFilterState, filterServers } from '../public/js/filters.js';
 import { metadata } from '../src/domain/server.js';
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
 test('Steam and GameDig player capacities keep their source field shapes', () => {
@@ -97,6 +98,28 @@ test('recommended ranking prefers Christmas relevance before country and proximi
   const high = { id: 'b', countryCode: 'FR', classification: { confidence: 'high', score: 9 } };
   const curated = { id: 'c', countryCode: 'GB', classification: { confidence: 'curated', score: 0 } };
   assert.deepEqual(rankServers([probable, curated, high], { countryCode: 'GB' }).map(row => row.id), ['b', 'c', 'a']);
+});
+test('country options and country filtering use located servers without dropping other filters', () => {
+  const rows = [
+    { id: 'a', name: 'Christmas DE', map: 'de_xmas', countryCode: 'DE', country: 'Germany', players: 0, classification: { confidence: 'high' } },
+    { id: 'b', name: 'Christmas US', map: 'de_xmas', countryCode: 'US', country: 'United States', players: 3, classification: { confidence: 'high' } },
+    { id: 'c', name: 'Christmas unknown', map: 'de_xmas', countryCode: null, players: 4, classification: { confidence: 'high' } }
+  ];
+  assert.deepEqual(countryOptions(rows), [['DE', 'Germany'], ['US', 'United States']]);
+  assert.deepEqual(countryFilterState(rows, false), { choices: [], disabled: true,
+    message: 'Server country filtering unavailable: GeoIP is not configured.' });
+  assert.equal(countryFilterState(rows, true).disabled, false);
+  assert.deepEqual(filterServers(rows, { search: '', country: 'DE', map: '', confidence: '', slots: false,
+    favorites: false, online: false, hideEmpty: false }, new Set()).map(row => row.id), ['a']);
+});
+test('Hide empty servers is frontend-only and unchecking restores zero-player rows', () => {
+  const rows = [{ id: 'empty', players: 0 }, { id: 'occupied', players: 2 }];
+  const filters = { search: '', country: '', map: '', confidence: '', slots: false,
+    favorites: false, online: false, hideEmpty: true };
+  assert.deepEqual(filterServers(rows, filters, new Set()).map(row => row.id), ['occupied']);
+  filters.hideEmpty = false;
+  assert.deepEqual(filterServers(rows, filters, new Set()).map(row => row.id), ['empty', 'occupied']);
+  assert.equal(rows[0].players, 0);
 });
 test('external strings are assigned as text and cannot become links', () => {
   const hostile = '<img src=x onerror=alert(1)>';

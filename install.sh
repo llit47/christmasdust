@@ -52,7 +52,7 @@ URL: http://127.0.0.1:3001 (default; put a TLS reverse proxy in front for public
 Service: christmasdust.service
 Config: /etc/christmasdust/christmasdust.env
 Add STEAM_API_KEY for automatic discovery, or include public IP:port servers in /etc/christmasdust/detection.json.
-Optional: configure a local GeoLite2 City MMDB for country and distance support.
+Optional: set GEOIP_PATH=/var/lib/christmasdust/geoip/GeoLite2-City.mmdb after installing a local MaxMind City database (docs/INSTALL.md).
 Commands:
   sudo systemctl restart christmasdust
   sudo journalctl -u christmasdust -f

@@ -19,6 +19,17 @@ test('public polling never triggers discovery; visitor location is country only'
   assert.equal((await get('/api/servers?filter=%5Cname_match%5C%2Aprivate%2A')).status, 200);
   assert.deepEqual(calls, []); assert.equal((await get('/api/query?ip=127.0.0.1')).status, 404);
 });
+test('server snapshot reports whether server GeoIP is configured without visitor coordinates', async t => {
+  const absent = await fixture(t);
+  const absentBody = await (await absent.get('/api/servers')).json();
+  assert.equal(absentBody.meta.serverGeoipConfigured, false);
+  const configured = await fixture(t, { GEOIP_PATH: '/var/lib/christmasdust/geoip/GeoLite2-City.mmdb' });
+  configured.monitor.snapshot = () => ({ servers: [{ id: '8.8.8.8:27015', countryCode: 'DE', country: 'Germany', latitude: 52.52, longitude: 13.405 }], meta: {} });
+  const body = await (await configured.get('/api/servers')).json();
+  assert.equal(body.meta.serverGeoipConfigured, true);
+  assert.deepEqual(body.servers[0], { id: '8.8.8.8:27015', countryCode: 'DE', country: 'Germany', latitude: 52.52, longitude: 13.405 });
+  assert.deepEqual(body.visitor, { countryCode: 'DE' });
+});
 test('health and readiness work independently of upstream freshness', async t => {
   const { get, monitor } = await fixture(t); assert.equal((await get('/api/ready')).status, 200);
   const body = await (await get('/api/health')).json(); assert.equal(body.version, '0.1.0'); assert.equal(body.stale, true);
