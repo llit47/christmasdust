@@ -18,7 +18,7 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   const title = e('div', undefined, 'server-title');
   const star = e('button', favorite ? '★' : '☆', 'favorite');
   star.type = 'button'; star.setAttribute('aria-label', `Favorite ${server.name || server.id}`); star.setAttribute('aria-pressed', String(favorite));
-  star.addEventListener('click', () => toggleFavorite(server.id));
+  star.addEventListener('click', () => toggleFavorite(server));
   const heading = e('h3', server.name || server.id);
   title.append(star, heading);
   const sub = e('div', undefined, 'server-meta');

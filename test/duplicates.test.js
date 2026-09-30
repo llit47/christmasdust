@@ -7,6 +7,9 @@ import { a2sFingerprint } from '../src/domain/duplicates.js';
 import { Monitor } from '../src/services/monitor.js';
 import { createApp } from '../src/routes/app.js';
 import { rankServers } from '../public/js/ranking.js';
+import { isFavorite, toggleServerFavorite } from '../public/js/favorites.js';
+import { filterServers } from '../public/js/filters.js';
+import { gameQuery } from '../src/services/query.js';
 
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
 const endpoints = ['8.8.8.8:27015', '1.1.1.1:27015', '9.9.9.9:27015', '4.2.2.2:27015', '208.67.222.222:27015'];
@@ -45,6 +48,16 @@ test('complete shared A2S identity groups endpoints without deleting monitored c
   await restored.init();
   assert.equal(restored.servers.size, 3);
   assert.equal(restored.snapshot().servers.length, 2);
+});
+
+test('shared GoldSrc challenge identity groups endpoints without A2S steamid', async () => {
+  const [first, second, other] = endpoints;
+  const query = gameQuery(readConfig({}), async () => info(12, { raw: { steamid: undefined } }),
+    async row => row.id === other ? '1' : '8412857032437472227');
+  const monitor = await fixture([first, second, other], query);
+  assert.equal(monitor.servers.size, 3);
+  assert.equal(monitor.snapshot().servers.length, 2);
+  assert.equal(monitor.snapshot().servers.find(row => row.id === other).duplicateCount, 0);
 });
 
 test('similar names and populations remain separate without matching strong A2S identity', async () => {
@@ -107,4 +120,31 @@ test('partial live A2S data ends grouping while failed queries retain last good 
   monitor.query = async () => { throw new Error('timeout'); };
   await monitor.run('live');
   assert.equal(monitor.servers.size, 2);
+});
+
+test('stale A2S observations separate endpoints even when their stored fingerprints match', async () => {
+  const monitor = await fixture(endpoints.slice(0, 2), () => info());
+  assert.equal(monitor.snapshot().servers.length, 1);
+  monitor.now = () => 1000000 + monitor.config.staleAfter + 1;
+  const rows = monitor.snapshot().servers;
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => row.stale && row.duplicateCount === 0));
+});
+
+test('favorites follow any grouped endpoint when the representative changes', () => {
+  const [oldId, newId] = endpoints;
+  const favorites = new Set([oldId]);
+  const group = { id: newId, duplicateEndpoints: [oldId], name: 'Christmas Dust', map: 'de_xmas',
+    players: 12, classification: { confidence: 'high' } };
+  const filters = { search: '', country: '', map: '', confidence: '', slots: false,
+    favorites: true, online: false, hideEmpty: false };
+  assert.equal(isFavorite(group, favorites), true);
+  assert.deepEqual(filterServers([group], filters, favorites), [group]);
+  toggleServerFavorite(group, favorites);
+  assert.equal(favorites.size, 0);
+  toggleServerFavorite(group, favorites);
+  assert.deepEqual([...favorites], [newId]);
+  const reverted = { ...group, id: oldId, duplicateEndpoints: [newId] };
+  assert.equal(isFavorite(reverted, favorites), true);
+  assert.deepEqual(filterServers([reverted], filters, favorites), [reverted]);
 });

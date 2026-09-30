@@ -47,7 +47,7 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 - Browser: polls only the cached snapshot every **30 seconds**, pauses while hidden.
 - Storage: atomic JSON snapshots; failures preserve last known data with explicit age and degraded status.
 - Classification: weighted, explainable Christmas signals from name, tags, optional description and map. `config/christmas-maps.json` distinguishes verified strong and probable maps; generic snow alone is insufficient. Curated inclusion stays separate. High confidence remains a heuristic.
-- Duplicate grouping: fresh matching A2S identities share one public result; the API reports the other endpoint IDs and count. Similar names alone remain separate, and all endpoints stay monitored.
+- Duplicate grouping: fresh matching A2S metadata and a usable Steam server identity share one public result. GoldSrc identity can come from a bounded `getchallenge steam` probe. The API reports other endpoint IDs and count; similar names alone remain separate, and all endpoints stay monitored.
 - Location: optional local GeoLite2 City MMDB, or explicitly trusted Cloudflare country headers; precise browser coordinates are never uploaded.
 
 API: `GET /api/servers`, `GET /api/health`, `GET /api/ready`. Optional token-protected `POST /api/admin/refresh` accepts no body and has a one-minute cooldown. No public querying or scan endpoint.

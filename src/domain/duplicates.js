@@ -3,19 +3,22 @@ import { cleanText } from './server.js';
 
 const normalized = value => cleanText(value).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
 const optional = value => typeof value === 'string' ? normalized(value) : value ?? null;
+export function usableServerIdentity(value) {
+  if (typeof value !== 'string' || !/^[1-9]\d{14,19}$/.test(value)) return false;
+  return BigInt(value) > 1n && BigInt(value) <= 18446744073709551615n;
+}
 
-// Only a complete live A2S_INFO observation with a shared, nonzero Steam server
-// ID can group endpoints. Generic game/version/tags alone identify a game build,
-// not a particular advertised server.
+// Complete live A2S_INFO metadata and a shared usable server ID are required.
+// GoldSrc can supply that ID through getchallenge steam when INFO omits it.
 export function a2sFingerprint(raw) {
   const info = raw?.raw;
-  const steamId = String(info?.steamid ?? '');
+  const steamId = usableServerIdentity(info?.steamid) ? info.steamid : raw?.serverIdentity;
   const name = normalized(raw?.name);
   const map = normalized(raw?.map);
   const folder = normalized(info?.folder);
   const game = normalized(info?.game);
   const maxPlayers = raw?.maxplayers ?? raw?.maxPlayers ?? raw?.max_players;
-  if (!/^\d{15,20}$/.test(steamId) || /^0+$/.test(steamId) || !name || !map || !folder || !game ||
+  if (!usableServerIdentity(steamId) || !name || !map || !folder || !game ||
     !Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 65535 ||
     !Number.isInteger(info?.protocol) || info.protocol < 0 || info.protocol > 255) return null;
   const tags = info.tags === undefined ? null : info.tags;
