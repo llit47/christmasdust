@@ -4,7 +4,7 @@ import { countryFilterState, filterServers } from './filters.js';
 import { isFavorite, toggleServerFavorite } from './favorites.js';
 import { availableChoice, readPreferences, restoredSort, writePreferences } from './preferences.js';
 import { hiddenEntries, hideServer, readHidden, restoreServer, writeHidden } from './hidden.js';
-import { lastUpdateLabel, setLocationSort, snapshotNotice } from './view-state.js';
+import { lastUpdateLabel, renderWhenUnfocused, setLocationSort, snapshotNotice } from './view-state.js';
 const $ = id => document.getElementById(id);
 let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
 let savedPreferences; let hiddenIds = new Set(); let choicesRestored = false;
@@ -72,6 +72,9 @@ function render() {
   if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length && snapshot.servers.every(row => row.stale === true) ? 'No recently verified servers are available yet.' : snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
   renderHidden();
 }
+function renderAfterPoll() {
+  renderWhenUnfocused(document.activeElement, [$('servers'), $('hidden-section')], render);
+}
 async function poll() {
   if (loading || document.hidden) return;
   loading = true;
@@ -97,9 +100,9 @@ async function poll() {
     $('last-update').textContent = lastUpdateLabel(snapshot.meta.lastLiveAt);
     $('version').textContent = `v${snapshot.version}`;
     if (!location) $('location-status').textContent = snapshot.visitor.countryCode ? `Servers in ${snapshot.visitor.countryCode} are preferred. Use your location for approximate distance; coordinates stay in this browser.` : $('country').disabled ? 'Server locations are unavailable. Your coordinates stay in this browser if you choose Use my location.' : 'Choose a country to filter, or use your location for approximate distance. Coordinates stay in this browser.';
-    if (!$('servers').contains(document.activeElement)) render();
+    renderAfterPoll();
   } catch {
-    if (snapshot) { snapshot.servers = snapshot.servers.map(row => ({ ...row, stale: true })); if (!$('servers').contains(document.activeElement)) render(); }
+    if (snapshot) { snapshot.servers = snapshot.servers.map(row => ({ ...row, stale: true })); renderAfterPoll(); }
     $('status').textContent = 'Could not reach the snapshot service. Waiting for fresh server data; retrying automatically.'; }
   finally { loading = false; }
 }

@@ -2,6 +2,10 @@ export function setLocationSort(select, enabled) {
   select.value = enabled ? 'proximity' : 'recommended';
 }
 
+export function renderWhenUnfocused(activeElement, regions, render) {
+  if (!regions.some(region => region.contains(activeElement))) render();
+}
+
 export function lastUpdateLabel(lastLiveAt) {
   const date = typeof lastLiveAt === 'number' ? new Date(lastLiveAt) : null;
   const time = date && Number.isFinite(date.getTime())

@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lastUpdateLabel, setLocationSort, snapshotNotice } from '../public/js/view-state.js';
+import { lastUpdateLabel, renderWhenUnfocused, setLocationSort, snapshotNotice } from '../public/js/view-state.js';
+
+test('polling preserves focus in server cards and the expanded hidden section', () => {
+  const cardButton = {}; const restoreButton = {}; const hiddenSummary = {}; const outside = {};
+  const regions = [{ contains: node => node === cardButton },
+    { contains: node => node === restoreButton || node === hiddenSummary }];
+  let rebuilds = 0;
+  const render = () => { rebuilds++; };
+  for (const active of [cardButton, restoreButton, hiddenSummary]) renderWhenUnfocused(active, regions, render);
+  assert.equal(rebuilds, 0);
+  renderWhenUnfocused(outside, regions, render);
+  assert.equal(rebuilds, 1);
+});
 
 test('successful location uses proximity sort and clearing restores recommended sort', () => {
   const select = { value: 'players' };

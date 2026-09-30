@@ -5,7 +5,14 @@ const limit = 5000;
 const validEndpoint = value => {
   if (typeof value !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$/.test(value)) return false;
   const [ip, port] = value.split(':');
-  return ip.split('.').every(part => +part <= 255) && +port >= 1 && +port <= 65535;
+  const parts = ip.split('.');
+  if (parts.some(part => +part > 255 || (part.length > 1 && part.startsWith('0'))) || +port < 1 || +port > 65535) return false;
+  const [a, b, c] = parts.map(Number);
+  // Keep these public IPv4 exclusions aligned with src/utils/address.js.
+  return !(a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2)) || (b === 88 && c === 99))) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) || (a === 203 && b === 0 && c === 113));
 };
 
 export function readHidden(storage) {

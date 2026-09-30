@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readPreferences, writePreferences, availableChoice, restoredSort, preferencesKey } from '../public/js/preferences.js';
 import { readHidden, writeHidden, hideServer, restoreServer, isHidden, hiddenEntries, hiddenKey } from '../public/js/hidden.js';
 import { filterServers } from '../public/js/filters.js';
+import { parseAddress } from '../src/utils/address.js';
 
 const storage = () => {
   const values = new Map();
@@ -11,6 +12,27 @@ const storage = () => {
 const filters = { search: '', country: '', map: '', confidence: '', slots: false, hideEmpty: false, favorites: false };
 const row = (id, duplicateEndpoints = []) => ({ id, duplicateEndpoints, name: 'Christmas Dust', map: 'de_xmas',
   players: 12, maxPlayers: 32, status: 'online', stale: false, classification: { confidence: 'high' } });
+
+test('hidden storage rejects the same non-public IPv4 endpoints as the backend', () => {
+  const store = storage();
+  const rejected = ['0.1.2.3:27015', '10.1.1.1:27015', '127.0.0.1:27015', '169.254.1.1:27015',
+    '172.16.0.1:27015', '172.31.255.255:27015', '192.168.1.1:27015', '100.64.0.1:27015',
+    '100.127.255.255:27015', '192.0.0.1:27015', '192.0.2.1:27015', '192.88.99.1:27015',
+    '198.18.0.1:27015', '198.19.0.1:27015', '198.51.100.1:27015', '203.0.113.1:27015',
+    '224.0.0.1:27015', '240.0.0.1:27015', '255.255.255.255:27015', '8.8.8.8:0', '8.8.8.8:65536',
+    '256.8.8.8:27015', '008.8.8.8:27015', 'localhost:27015'];
+  for (const endpoint of rejected) {
+    assert.throws(() => parseAddress(endpoint), endpoint);
+    store.setItem(hiddenKey, JSON.stringify([endpoint]));
+    assert.equal(readHidden(store).size, 0, endpoint);
+    assert.equal(writeHidden(store, new Set([endpoint])), false, endpoint);
+  }
+  for (const endpoint of ['8.8.8.8:27015', '192.0.1.1:27015', '100.128.0.1:65535', '172.32.0.1:1']) {
+    assert.doesNotThrow(() => parseAddress(endpoint));
+    store.setItem(hiddenKey, JSON.stringify([endpoint]));
+    assert.deepEqual([...readHidden(store)], [endpoint]);
+  }
+});
 
 test('valid browser preferences restore with bounded fields and dynamic choices', () => {
   const store = storage();
