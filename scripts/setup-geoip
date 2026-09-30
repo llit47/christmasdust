@@ -80,6 +80,7 @@ trap 'rm -f "$env_backup"' EXIT
 env_changed=true
 systemctl restart christmasdust.service
 cd "$ROOT/current"
+# shellcheck disable=SC2016 # JavaScript template literals belong to Node, not Bash.
 endpoint=$("$NODE" --env-file="$ENV_FILE" --input-type=module -e '
   import { readConfig } from "./src/config/index.js";
   const { host, port } = readConfig();

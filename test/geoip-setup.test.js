@@ -58,9 +58,9 @@ test('rejects symlinks and unsafe environment permissions; database permissions 
   await writeFile(target, 'unchanged', { mode: 0o666 });
   await symlink(target, link);
   await assert.rejects(configureGeoip(link, '123', 'valid-key', dir), /regular file/);
+  await chmod(target, 0o666);
   await assert.rejects(configureEnvironment(target, '/database'), /without group\/other write access/);
   await assert.rejects(protectDatabase(link, process.getgid()), /ELOOP/);
-  await chmod(target, 0o666);
   await protectDatabase(target, process.getgid());
   assert.equal((await stat(target)).mode & 0o777, 0o640);
 });
