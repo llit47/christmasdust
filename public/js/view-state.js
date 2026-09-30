@@ -1,8 +1,5 @@
-export function applyInitialCountry(select, countryCode, choices, applied) {
-  if (applied) return true;
-  if (!countryCode || !choices.some(([code]) => code === countryCode)) return false;
-  select.value = countryCode;
-  return true;
+export function setLocationSort(select, enabled) {
+  select.value = enabled ? 'proximity' : 'recommended';
 }
 
 export function lastUpdateLabel(lastLiveAt) {

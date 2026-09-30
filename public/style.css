@@ -24,10 +24,10 @@ a {
 button,input,select {
   font:inherit;
 }
-button,a,input,select,summary {
+button,a,input,select {
   -webkit-tap-highlight-color:transparent;
 }
-button,.button,select,summary {
+button,.button,select {
   cursor:pointer;
 }
 :focus-visible {
@@ -340,16 +340,6 @@ input[type=checkbox] {
 .server-actions .button {
   flex:1;
   min-width:0;
-}
-.server details {
-  grid-column:1/-1;
-  border-top:1px solid var(--line);
-  padding-top:7px;
-  color:var(--muted);
-  font-size:12px;
-}
-.server details p {
-  overflow-wrap:anywhere;
 }
 .fineprint {
   max-width:800px;

@@ -137,7 +137,7 @@ test('favorites follow any grouped endpoint when the representative changes', ()
   const group = { id: newId, duplicateEndpoints: [oldId], name: 'Christmas Dust', map: 'de_xmas',
     players: 12, classification: { confidence: 'high' } };
   const filters = { search: '', country: '', map: '', confidence: '', slots: false,
-    favorites: true, online: false, hideEmpty: false };
+    favorites: true, hideEmpty: false };
   assert.equal(isFavorite(group, favorites), true);
   assert.deepEqual(filterServers([group], filters, favorites), [group]);
   toggleServerFavorite(group, favorites);

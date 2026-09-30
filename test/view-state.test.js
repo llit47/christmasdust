@@ -1,41 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyInitialCountry, lastUpdateLabel, snapshotNotice } from '../public/js/view-state.js';
+import { lastUpdateLabel, setLocationSort, snapshotNotice } from '../public/js/view-state.js';
 
-test('visitor country remains pending until it appears in a later snapshot', () => {
-  const choices = [['DE', 'Germany'], ['PL', 'Poland']];
-  const select = { value: '' };
-  let done = applyInitialCountry(select, 'PL', choices.slice(0, 1), false);
-  assert.equal(done, false);
-  assert.equal(select.value, '');
-  done = applyInitialCountry(select, 'PL', choices, done);
-  assert.equal(done, true);
-  assert.equal(select.value, 'PL');
-  select.value = '';
-  applyInitialCountry(select, 'DE', choices, done);
-  assert.equal(select.value, '');
-  for (const code of [null, 'FR']) {
-    const unavailable = { value: '' };
-    assert.equal(applyInitialCountry(unavailable, code, choices, false), false);
-    assert.equal(unavailable.value, '');
-  }
-});
-
-test('manual country selection before visitor country appears is preserved', () => {
-  const select = { value: '' };
-  assert.equal(applyInitialCountry(select, 'PL', [['DE', 'Germany']], false), false);
-  select.value = 'DE';
-  const done = true; // Country control interaction locks the automatic default.
-  assert.equal(applyInitialCountry(select, 'PL', [['DE', 'Germany'], ['PL', 'Poland']], done), true);
-  assert.equal(select.value, 'DE');
-});
-
-test('manually choosing All countries also prevents a later automatic default', () => {
-  const select = { value: '' };
-  assert.equal(applyInitialCountry(select, 'PL', [['DE', 'Germany']], false), false);
-  const done = true; // Pointer or keyboard interaction can reselect the unchanged empty value.
-  applyInitialCountry(select, 'PL', [['DE', 'Germany'], ['PL', 'Poland']], done);
-  assert.equal(select.value, '');
+test('successful location uses proximity sort and clearing restores recommended sort', () => {
+  const select = { value: 'players' };
+  setLocationSort(select, true);
+  assert.equal(select.value, 'proximity');
+  setLocationSort(select, false);
+  assert.equal(select.value, 'recommended');
 });
 
 test('last update label uses local hours and minutes with an unavailable fallback', () => {

@@ -22,6 +22,5 @@ export function filterServers(servers, filters, favoriteIds) {
     (!filters.confidence || row.classification.confidence === filters.confidence) &&
     (!filters.slots || (row.status === 'online' && !row.stale && row.maxPlayers > row.players && !row.password)) &&
     (!filters.favorites || isFavorite(row, favoriteIds)) &&
-    (!filters.online || (row.status === 'online' && !row.stale)) &&
     (!filters.hideEmpty || row.players !== 0));
 }
