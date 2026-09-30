@@ -28,7 +28,8 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now 
       const cf = req.get('CF-IPCountry');
       if (/^[A-Z]{2}$/.test(cf ?? '') && !['XX', 'T1'].includes(cf)) countryCode = cf;
     }
-    res.json({ ...monitor.snapshot(), visitor: { countryCode }, version });
+    const snapshot = monitor.snapshot();
+    res.json({ ...snapshot, meta: { ...snapshot.meta, serverGeoipConfigured: Boolean(config.geoipPath) }, visitor: { countryCode }, version });
   });
   let lastAdmin = -Infinity;
   app.post('/api/admin/refresh', (req, res) => {

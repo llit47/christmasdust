@@ -24,11 +24,32 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/christmasdust/christmasdust.env | Protected persistent application environment |
 | /etc/christmasdust/detection.json | Protected classification, include/exclude lists |
 | /etc/christmasdust/channel | Update branch/tag |
-| /var/lib/christmasdust/ | Persistent snapshot and optional local GeoIP |
+| /var/lib/christmasdust/ | Persistent snapshot and prepared `geoip/` directory for an optional local MMDB |
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
 | /usr/local/bin/christmasdust | Update/version command |
 
-Set a Steam key or curated addresses before expecting results. Add GEOIP_PATH for country and distance support. Restart after changing config. Readiness checks verify startup and restored storage initialization, not Steam availability or the presence of matching servers.
+Set a Steam key or curated addresses before expecting results. Add `GEOIP_PATH` for server country filtering and approximate distance. Restart after changing config. Readiness checks verify startup and restored storage initialization, not Steam availability or the presence of matching servers.
+
+## Server country data (optional)
+
+The native installer prepares `/var/lib/christmasdust/geoip/` but does not download a licensed database. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
+
+```text
+AccountID YOUR_ACCOUNT_ID
+LicenseKey YOUR_LICENSE_KEY
+EditionIDs GeoLite2-City
+DatabaseDirectory /var/lib/christmasdust/geoip
+```
+
+Protect the credentials with `sudo chmod 0600 /etc/GeoIP.conf`, run `sudo geoipupdate`, and make the database readable to the service:
+
+```sh
+sudo chgrp christmasdust /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
+sudo chmod 0640 /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
+sudo -u christmasdust test -r /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
+```
+
+Set `GEOIP_PATH=/var/lib/christmasdust/geoip/GeoLite2-City.mmdb` in `/etc/christmasdust/christmasdust.env`, then `sudo systemctl restart christmasdust`. Check `/api/servers`: `meta.serverGeoipConfigured` should be `true`, and matched servers with database records should have `countryCode`, `country`, `latitude` and `longitude`. Arrange recurring `geoipupdate`, verify the replacement file remains service-readable, and restart ChristmasDust to load each new database. If no database is configured, browsing still works and the Country control explains why it is unavailable. The database is approximate; see [MaxMind's update guidance](https://dev.maxmind.com/geoip/updating-databases/).
 
 ## Reverse proxy
 

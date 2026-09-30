@@ -1,6 +1,6 @@
 import maxmind from 'maxmind';
 export async function loadGeoip(path) {
-  if (!path) return () => ({});
+  if (!path) return () => ({ countryCode: null, country: null, latitude: null, longitude: null, accuracyRadiusKm: null });
   const reader = await maxmind.open(path);
   return ip => {
     const row = reader.get(ip.replace(/^::ffff:/, ''));

@@ -1,5 +1,6 @@
 import { rankServers } from './ranking.js';
 import { serverCard, element } from './render.js';
+import { countryFilterState, filterServers } from './filters.js';
 const $ = id => document.getElementById(id);
 let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
 try { const saved = JSON.parse(localStorage.getItem('christmasdust.favorites') || '[]'); if (Array.isArray(saved)) favoriteIds = new Set(saved.filter(v => typeof v === 'string').slice(0, 5000)); } catch { /* Storage is optional. */ }
@@ -21,14 +22,9 @@ function options(id, values, label) {
 }
 function render() {
   if (!snapshot) return;
-  const query = $('search').value.trim().toLowerCase();
-  const rows = snapshot.servers.filter(row => {
-    return (!query || `${row.name} ${row.map} ${row.id}`.toLowerCase().includes(query)) &&
-      (!$('country').value || row.countryCode === $('country').value) && (!$('map').value || row.map === $('map').value) &&
-      (!$('confidence').value || row.classification.confidence === $('confidence').value) &&
-      (!$('slots').checked || (row.status === 'online' && !row.stale && row.maxPlayers > row.players && !row.password)) &&
-      (!$('favorites').checked || favoriteIds.has(row.id)) && (!$('online').checked || (row.status === 'online' && !row.stale));
-  });
+  const rows = filterServers(snapshot.servers, { search: $('search').value, country: $('country').value,
+    map: $('map').value, confidence: $('confidence').value, slots: $('slots').checked,
+    favorites: $('favorites').checked, online: $('online').checked, hideEmpty: $('hide-empty').checked }, favoriteIds);
   const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position and open details during polling.
@@ -44,7 +40,10 @@ async function poll() {
     const next = await response.json();
     if (!Array.isArray(next.servers) || !next.meta || !next.visitor) throw new Error('Invalid snapshot');
     snapshot = next;
-    options('country', [...new Map(snapshot.servers.filter(s => s.countryCode).map(s => [s.countryCode, s.country || s.countryCode]))].sort((a, b) => a[1].localeCompare(b[1])), 'All countries');
+    const countries = countryFilterState(snapshot.servers, snapshot.meta.serverGeoipConfigured);
+    options('country', countries.choices, countries.disabled ? 'Countries unavailable' : 'All countries');
+    $('country').disabled = countries.disabled;
+    $('country-status').textContent = countries.message;
     options('map', [...new Set(snapshot.servers.map(s => s.map).filter(Boolean))].sort().map(s => [s, s]), 'All maps');
     const messages = [];
     if (snapshot.meta.stale) messages.push('The snapshot is stale. Last known details are shown; availability may have changed.');
@@ -52,7 +51,7 @@ async function poll() {
     if (snapshot.meta.discoveryDisabled && !snapshot.servers.length) messages.push('Discovery is not configured. The operator can add a Steam API key or curated servers.');
     $('status').textContent = messages.join(' ');
     $('version').textContent = `v${snapshot.version}`;
-    if (!location) $('location-status').textContent = snapshot.visitor.countryCode ? `Servers in ${snapshot.visitor.countryCode} are preferred. Use your location for approximate distance; coordinates stay in this browser.` : 'Choose a country to filter, or use your location for approximate distance. Coordinates stay in this browser.';
+    if (!location) $('location-status').textContent = snapshot.visitor.countryCode ? `Servers in ${snapshot.visitor.countryCode} are preferred. Use your location for approximate distance; coordinates stay in this browser.` : $('country').disabled ? 'Server locations are unavailable. Your coordinates stay in this browser if you choose Use my location.' : 'Choose a country to filter, or use your location for approximate distance. Coordinates stay in this browser.';
     if (!$('servers').contains(document.activeElement) && !$('servers').querySelector('details[open]')) render();
   } catch {
     if (snapshot) { snapshot.servers = snapshot.servers.map(row => ({ ...row, stale: true })); if (!$('servers').contains(document.activeElement)) render(); }

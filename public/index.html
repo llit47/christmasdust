@@ -17,11 +17,11 @@
       <p id="location-status" class="muted">Country preference is automatic when available. Precise location is optional and stays in your browser.</p>
       <form id="filters" class="filters" role="search">
         <label class="search">Search servers<input id="search" type="search" placeholder="Server name, map or IP…" maxlength="200"></label>
-        <label>Country<select id="country"><option value="">All countries</option></select></label>
+        <label>Country<select id="country" aria-describedby="country-status" disabled><option value="">Countries unavailable</option></select><span id="country-status" class="filter-note">Checking server locations…</span></label>
         <label>Map<select id="map"><option value="">All maps</option></select></label>
         <label>Christmas confidence<select id="confidence"><option value="">All matches</option><option value="high">High confidence</option><option value="probable">Probable winter</option><option value="curated">Curated</option></select></label>
         <label>Sort by<select id="sort"><option value="recommended">Recommended</option><option value="players">Most players</option><option value="proximity">Nearest (use location)</option></select></label>
-        <div class="toggles"><label><input type="checkbox" id="slots"> Open slots only</label><label><input type="checkbox" id="favorites"> ★ Favorites</label><label><input type="checkbox" id="online"> Online only</label></div>
+        <div class="toggles"><label><input type="checkbox" id="slots"> Open slots only</label><label><input type="checkbox" id="hide-empty"> Hide empty servers</label><label><input type="checkbox" id="favorites"> ★ Favorites</label><label><input type="checkbox" id="online"> Online only</label></div>
       </form>
       <div class="list-heading"><span id="count">Finding your next server…</span><span>Automatic updates · 30s</span></div>
       <p id="status" class="notice" role="status">Loading the latest server snapshot…</p>

@@ -20,6 +20,20 @@ function fixture(overrides = {}) {
     store: { load: async () => null, save: async () => {} }, now: () => time, log: { warn() {} }, ...overrides });
   return { monitor, advance: ms => { time += ms; } };
 }
+test('GeoIP enrichment exposes server country and coordinates after discovery and snapshot restore', async () => {
+  const located = { countryCode: 'DE', country: 'Germany', latitude: 52.52, longitude: 13.405, accuracyRadiusKm: 20 };
+  const geoip = ip => ip === a.ip ? located : {};
+  const store = { load: async () => null, save: async () => {} };
+  const { monitor } = fixture({ geoip, store });
+  await monitor.init(); await monitor.run('discovery');
+  assert.deepEqual(Object.fromEntries(['countryCode', 'country', 'latitude', 'longitude'].map(key => [key, monitor.snapshot().servers.find(row => row.id === a.id)[key]])),
+    { countryCode: 'DE', country: 'Germany', latitude: 52.52, longitude: 13.405 });
+  const prior = { ...monitor.servers.get(a.id), countryCode: null, country: null, latitude: null, longitude: null };
+  const restored = fixture({ geoip, store: { load: async () => ({ state: monitor.state, servers: [prior] }), save: async () => {} } }).monitor;
+  await restored.init();
+  assert.equal(restored.snapshot().servers[0].countryCode, 'DE');
+  assert.equal(restored.snapshot().servers[0].latitude, 52.52);
+});
 test('discovery and live are independent; scoped refresh retains unrelated entries', async () => {
   let calls = 0;
   const { monitor } = fixture({ query: async () => { calls++; return { name: 'xmas', numplayers: 2 }; } });

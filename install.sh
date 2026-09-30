@@ -21,6 +21,7 @@ id christmasdust >/dev/null 2>&1 || useradd --system --home-dir /var/lib/christm
 install -d -m 0755 /opt/christmasdust /opt/christmasdust/releases
 install -d -o root -g christmasdust -m 0750 /etc/christmasdust
 install -d -o christmasdust -g christmasdust -m 0750 /var/lib/christmasdust
+install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 case $(uname -m) in x86_64) arch=x64;; aarch64) arch=arm64;; *) echo 'Supported architectures: x86_64 and aarch64'; exit 1;; esac
@@ -52,7 +53,7 @@ URL: http://127.0.0.1:3001 (default; put a TLS reverse proxy in front for public
 Service: christmasdust.service
 Config: /etc/christmasdust/christmasdust.env
 Add STEAM_API_KEY for automatic discovery, or include public IP:port servers in /etc/christmasdust/detection.json.
-Optional: configure a local GeoLite2 City MMDB for country and distance support.
+Optional: set GEOIP_PATH=/var/lib/christmasdust/geoip/GeoLite2-City.mmdb after installing a local MaxMind City database (docs/INSTALL.md).
 Commands:
   sudo systemctl restart christmasdust
   sudo journalctl -u christmasdust -f
