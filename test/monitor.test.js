@@ -350,7 +350,7 @@ test('a targeted result cap marks discovery partial while preserving broad resul
   assert.equal(result.partial, true); assert.deepEqual(result.servers.map(row => row.id), [b.id]);
 });
 test('GameDig uses correct game and bounded timeout without player collection', async () => {
-  let options; await gameQuery(readConfig({}), async input => { options = input; return {}; })(a);
+  let options; await gameQuery(readConfig({}), async input => { options = input; return {}; }, async () => null)(a);
   assert.equal(options.type, 'counterstrike16'); assert.equal(options.requestPlayers, false); assert.equal(options.maxAttempts, 1); assert.equal(options.givenPortOnly, true);
 });
 test('scheduler starts discovery then live and stops future work', async () => {

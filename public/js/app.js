@@ -1,12 +1,13 @@
 import { rankServers } from './ranking.js';
 import { serverCard, element } from './render.js';
 import { countryFilterState, filterServers } from './filters.js';
+import { isFavorite, toggleServerFavorite } from './favorites.js';
 const $ = id => document.getElementById(id);
 let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
 try { const saved = JSON.parse(localStorage.getItem('christmasdust.favorites') || '[]'); if (Array.isArray(saved)) favoriteIds = new Set(saved.filter(v => typeof v === 'string').slice(0, 5000)); } catch { /* Storage is optional. */ }
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3000); }
-function toggleFavorite(id) {
-  if (favoriteIds.has(id)) favoriteIds.delete(id); else favoriteIds.add(id);
+function toggleFavorite(server) {
+  toggleServerFavorite(server, favoriteIds);
   try { localStorage.setItem('christmasdust.favorites', JSON.stringify([...favoriteIds])); } catch { toast('Favorites are saved for this session only.'); }
   render();
 }
@@ -28,7 +29,7 @@ function render() {
   const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position and open details during polling.
-  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: favoriteIds.has(row.id), toggleFavorite, copy })));
+  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, copy })));
   if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
 }
 async function poll() {

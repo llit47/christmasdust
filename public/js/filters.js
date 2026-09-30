@@ -1,3 +1,5 @@
+import { isFavorite } from './favorites.js';
+
 export function countryOptions(servers) {
   return [...new Map(servers.filter(row => /^[A-Z]{2}$/.test(row.countryCode ?? ''))
     .map(row => [row.countryCode, row.country || row.countryCode]))]
@@ -18,7 +20,7 @@ export function filterServers(servers, filters, favoriteIds) {
     (!filters.map || row.map === filters.map) &&
     (!filters.confidence || row.classification.confidence === filters.confidence) &&
     (!filters.slots || (row.status === 'online' && !row.stale && row.maxPlayers > row.players && !row.password)) &&
-    (!filters.favorites || favoriteIds.has(row.id)) &&
+    (!filters.favorites || isFavorite(row, favoriteIds)) &&
     (!filters.online || (row.status === 'online' && !row.stale)) &&
     (!filters.hideEmpty || row.players !== 0));
 }

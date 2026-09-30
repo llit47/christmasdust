@@ -1,5 +1,6 @@
 import { classify } from '../domain/classify.js';
 import { metadata, liveMetadata, cleanText } from '../domain/server.js';
+import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
 export class Monitor {
@@ -91,7 +92,7 @@ export class Monitor {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...liveMetadata(raw), ...this.geoip(row.ip),
+          return { ...row, ...liveMetadata(raw), a2sFingerprint: a2sFingerprint(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags,
               description: typeof raw.description === 'string' ? raw.description : row.discoveryDescription,
               discoverySources: row.discoverySources }, row, row.curated),
@@ -123,9 +124,10 @@ export class Monitor {
   }
   snapshot() {
     const age = this.state.lastLiveAt === null ? null : Math.max(0, this.now() - this.state.lastLiveAt);
-    return { servers: [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
+    const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none').map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
-      stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' })),
+      stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' }));
+    return { servers: groupDuplicates(rows),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }
