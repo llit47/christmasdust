@@ -9,7 +9,11 @@ if [[ ${1:-} == version ]]; then
   "$NODE" -p 'const fs=require("fs"); const p="/opt/christmasdust/current/"; JSON.parse(fs.readFileSync(p+"package.json")).version+" ("+fs.readFileSync(p+"REVISION","utf8").trim()+")"'
   exit
 fi
-[[ ${1:-} == update ]] || { echo 'Usage: christmasdust version | sudo christmasdust update [branch-or-tag]'; exit 2; }
+if [[ ${1:-} == setup-geoip ]]; then
+  (( EUID == 0 )) || { echo 'GeoIP setup requires root.' >&2; exit 1; }
+  exec "$ROOT/current/scripts/setup-geoip"
+fi
+[[ ${1:-} == update ]] || { echo 'Usage: christmasdust version | sudo christmasdust update [branch-or-tag] | sudo christmasdust setup-geoip'; exit 2; }
 [[ $EUID == 0 ]] || { echo 'Updates require root.' >&2; exit 1; }
 exec 9>/run/lock/christmasdust-update.lock
 flock -n 9 || { echo 'Another update is running.' >&2; exit 1; }
