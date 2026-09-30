@@ -10,6 +10,8 @@ source /etc/os-release
 channel=${CHRISTMASDUST_CHANNEL:-main}
 [[ $channel =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ && $channel != *..* ]] || { echo 'Invalid channel'; exit 1; }
 if [[ -L /opt/christmasdust/current ]]; then
+  [[ ! -L /var/lib/christmasdust/geoip ]] || { echo 'GeoIP directory must not be a symlink.' >&2; exit 1; }
+  install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
   echo 'Existing installation found; preserving configuration and running updater.'
   exec /usr/local/bin/christmasdust update "${CHRISTMASDUST_CHANNEL:-$(cat /etc/christmasdust/channel)}"
 fi
@@ -21,6 +23,7 @@ id christmasdust >/dev/null 2>&1 || useradd --system --home-dir /var/lib/christm
 install -d -m 0755 /opt/christmasdust /opt/christmasdust/releases
 install -d -o root -g christmasdust -m 0750 /etc/christmasdust
 install -d -o christmasdust -g christmasdust -m 0750 /var/lib/christmasdust
+[[ ! -L /var/lib/christmasdust/geoip ]] || { echo 'GeoIP directory must not be a symlink.' >&2; exit 1; }
 install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT

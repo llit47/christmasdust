@@ -15,6 +15,10 @@ exec 9>/run/lock/christmasdust-update.lock
 flock -n 9 || { echo 'Another update is running.' >&2; exit 1; }
 channel=${2:-$(cat "$CONFIG/channel")}
 [[ $channel =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*$ && $channel != *..* ]] || { echo 'Invalid branch/tag'; exit 1; }
+# Existing native installs may predate the optional GeoIP directory. Prepare
+# it before staged validation, using the same ownership/mode as fresh installs.
+[[ ! -L /var/lib/christmasdust/geoip ]] || { echo 'GeoIP directory must not be a symlink.' >&2; exit 1; }
+install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
 previous=$(readlink -f "$ROOT/current" || true)
 stage=$(mktemp -d "$ROOT/releases/staging.XXXXXXXX")
 chown christmasdust:christmasdust "$stage"

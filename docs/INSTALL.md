@@ -32,7 +32,7 @@ Set a Steam key or curated addresses before expecting results. Add `GEOIP_PATH` 
 
 ## Server country data (optional)
 
-The native installer prepares `/var/lib/christmasdust/geoip/` but does not download a licensed database. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
+The native installer and updater prepare `/var/lib/christmasdust/geoip/` as `root:christmasdust` with mode `0750`, including on older installations, but do not download a licensed database. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
 
 ```text
 AccountID YOUR_ACCOUNT_ID
