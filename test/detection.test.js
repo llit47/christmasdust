@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DETECTION_VERSION, migrateDetection, serializeDetection, validateDetection } from '../src/config/detection.js';
+import { CURRENT_TERM_LIMIT, DETECTION_VERSION, migrateDetection, serializeDetection, validateDetection } from '../src/config/detection.js';
 import { loadDetection } from '../src/config/index.js';
 
 const legacy = { strong: ['christmas', 'xmas', 'santa', 'noel', 'weihnacht', 'swieta'],
@@ -35,6 +35,38 @@ test('transitional unversioned related terms also migrate without losing custom 
   assert.ok(config.related.includes('myholidayterm'));
   assert.equal(config.related.filter(term => term === 'santa').length, 1);
   assert.equal(config.version, DETECTION_VERSION);
+});
+test('maximum-size legacy term arrays migrate without dropping custom terms', () => {
+  const terms = prefix => Array.from({ length: 1000 }, (_, index) => `${prefix}${index}`);
+  const strong = terms('customstrong');
+  const related = terms('customrelated');
+  const weak = terms('customweak');
+  strong[0] = 'santa';
+  const { config } = migrateDetection({ strong, related, weak, include: [], exclude: [] });
+  for (const term of strong.slice(1)) assert.ok(config.strong.includes(term));
+  for (const term of related) assert.ok(config.related.includes(term));
+  for (const term of weak) assert.ok(config.weak.includes(term));
+  assert.ok(config.strong.includes('weihnachten'));
+  assert.ok(config.related.includes('santa'));
+  assert.ok(config.related.includes('jinglebells'));
+  for (const term of ['holiday', 'ice', 'frozen']) assert.ok(config.weak.includes(term));
+  assert.equal(config.weak.length, CURRENT_TERM_LIMIT);
+  assert.equal(validateDetection(config), DETECTION_VERSION);
+});
+test('normalized duplicates and already-present defaults do not consume migration capacity', () => {
+  const weak = Array.from({ length: 998 }, (_, index) => `operatorweak${index}`);
+  weak.push('HOLIDAY', 'ice');
+  const { config } = migrateDetection({ ...legacy, weak, strong: [...legacy.strong, 'X_MAS'] });
+  assert.equal(config.strong.filter(term => /^x[_-]?mas$/i.test(term)).length, 1);
+  assert.ok(config.weak.includes('HOLIDAY'));
+  assert.equal(config.weak.includes('holiday'), false);
+  assert.equal(config.weak.length, 1001);
+  assert.equal(validateDetection(config), DETECTION_VERSION);
+});
+test('current schema accepts migration headroom but rejects entries beyond it', () => {
+  const weak = Array.from({ length: CURRENT_TERM_LIMIT }, (_, index) => `weak${index}`);
+  assert.equal(validateDetection({ ...fresh, weak }), DETECTION_VERSION);
+  assert.throws(() => validateDetection({ ...fresh, weak: [...weak, 'extra'] }), /Invalid detection weak/);
 });
 test('current configuration migration is a no-op and leaves source untouched', () => {
   const input = structuredClone(fresh); const before = JSON.stringify(input);

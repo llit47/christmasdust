@@ -1,6 +1,8 @@
 import { parseAddress } from '../utils/address.js';
 
 export const DETECTION_VERSION = 2;
+export const LEGACY_TERM_LIMIT = 1000;
+export const CURRENT_TERM_LIMIT = LEGACY_TERM_LIMIT + 3;
 const required = ['strong', 'weak', 'include', 'exclude'];
 const added = { strong: ['weihnachten'], related: ['santa', 'jinglebells'], weak: ['holiday', 'ice', 'frozen'] };
 
@@ -16,7 +18,9 @@ export function validateDetection(value) {
   for (const key of Object.keys(value)) if (!allowed.has(key)) throw new Error(`Unknown detection key: ${key}`);
   for (const key of [...required, ...(version === 2 || value.related !== undefined ? ['related'] : [])]) {
     const entries = value[key];
-    if (!Array.isArray(entries) || entries.length > 1000 || entries.some(entry =>
+    const limit = version === DETECTION_VERSION && !['include', 'exclude'].includes(key)
+      ? CURRENT_TERM_LIMIT : LEGACY_TERM_LIMIT;
+    if (!Array.isArray(entries) || entries.length > limit || entries.some(entry =>
       typeof entry !== 'string' || !entry.trim() || entry.length > 100)) throw new Error(`Invalid detection ${key}`);
   }
   for (const key of ['include', 'exclude']) for (const entry of value[key]) parseAddress(entry);
@@ -40,10 +44,22 @@ export function migrateDetection(value) {
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
-  // Only the old built-in "santa" changes category. Keep every other custom term.
-  const strong = unique([...value.strong.filter(term => termKey(term) !== 'santa'), ...added.strong]);
-  const related = unique([...(value.related || []), ...added.related]);
-  const weak = unique([...value.weak, ...added.weak]);
+  // Deduplicate operator terms before adding defaults so custom placement wins.
+  // Only the old built-in "santa" changes category.
+  const santas = value.strong.filter(term => termKey(term) === 'santa');
+  const strong = unique(value.strong.filter(term => termKey(term) !== 'santa'));
+  const related = unique([...(value.related || []), ...santas]);
+  const weak = unique(value.weak);
+  const addDefaults = (entries, defaults) => {
+    for (const term of defaults) {
+      const key = termKey(term);
+      if (seen.has(key) || entries.length >= CURRENT_TERM_LIMIT) continue;
+      seen.add(key); entries.push(term);
+    }
+  };
+  addDefaults(strong, added.strong);
+  addDefaults(related, added.related);
+  addDefaults(weak, added.weak);
   const config = { version: DETECTION_VERSION, strong, related, weak,
     include: [...value.include], exclude: [...value.exclude] };
   validateDetection(config);

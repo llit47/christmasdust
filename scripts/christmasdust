@@ -25,10 +25,21 @@ config_backup=$(mktemp -d "$CONFIG/.detection-update.XXXXXXXX")
 config_candidate=$(mktemp "$CONFIG/.detection-candidate.XXXXXXXX")
 config_restore=
 config_switched=false
+snapshot_restore=
+management_candidate=
+channel_candidate=
+fsync_paths() {
+  "$NODE" -e 'const fs=require("node:fs"); for (const path of process.argv.slice(1)) {
+    const fd=fs.openSync(path,"r"); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  }' "$@"
+}
 cleanup() {
   rm -rf -- "$stage" "$snapshot_backup" "$config_backup"
   rm -f -- "$config_candidate"
   if [[ -n $config_restore ]]; then rm -f -- "$config_restore"; fi
+  if [[ -n $snapshot_restore ]]; then rm -f -- "$snapshot_restore"; fi
+  if [[ -n $management_candidate ]]; then rm -f -- "$management_candidate"; fi
+  if [[ -n $channel_candidate ]]; then rm -f -- "$channel_candidate"; fi
 }
 rollback() {
   local result=$?
@@ -37,17 +48,30 @@ rollback() {
     echo 'Update failed; restoring previous application, configuration and snapshot.' >&2
     systemctl stop christmasdust || true
     if [[ $config_switched == true ]]; then
+      # Reverse the commit order: durable legacy config first, old pointer second.
       config_restore=$(mktemp "$CONFIG/.detection-restore.XXXXXXXX")
       cp -p "$config_backup/detection.json" "$config_restore"
+      fsync_paths "$config_restore" "$CONFIG"
       mv -Tf "$config_restore" "$CONFIG/detection.json"
+      fsync_paths "$CONFIG"
     fi
-    ln -s "$previous" "$ROOT/rollback-link"
-    mv -Tf "$ROOT/rollback-link" "$ROOT/current"
     if [[ $snapshot_state == present ]]; then
-      cp -p "$snapshot_backup/snapshot.json" /var/lib/christmasdust/snapshot.json
+      snapshot_restore=$(mktemp /var/lib/christmasdust/.snapshot-restore.XXXXXXXX)
+      cp -p "$snapshot_backup/snapshot.json" "$snapshot_restore"
+      fsync_paths "$snapshot_restore" /var/lib/christmasdust
+      mv -Tf "$snapshot_restore" /var/lib/christmasdust/snapshot.json
+      fsync_paths /var/lib/christmasdust
     elif [[ $snapshot_state == absent ]]; then
       rm -f /var/lib/christmasdust/snapshot.json
+      fsync_paths /var/lib/christmasdust
     fi
+    # Restore every old-release input before making the old pointer durable.
+    [[ ! -e $ROOT/rollback-link || -L $ROOT/rollback-link ]]
+    rm -f "$ROOT/rollback-link" # A prior interrupted update may have left it.
+    ln -s "$previous" "$ROOT/rollback-link"
+    fsync_paths "$ROOT"
+    mv -Tf "$ROOT/rollback-link" "$ROOT/current"
+    fsync_paths "$ROOT"
     systemctl reset-failed christmasdust || true
     systemctl start christmasdust || true
     if health; then echo 'Previous version is healthy.' >&2; else echo 'Rollback needs attention: journalctl -u christmasdust' >&2; fi
@@ -68,7 +92,10 @@ health() {
       curl --noproxy '*' -fsS --max-time 2 "$endpoint" | "$NODE" --input-type=module -e '
         let body=""; for await (const chunk of process.stdin) body+=chunk;
         try { const data=JSON.parse(body); process.exit(data.ready === true && data.revision === process.argv[1] ? 0 : 1); } catch { process.exit(1); }
-      ' "$expected"; then return 0; fi
+      ' "$expected"; then
+      if [[ ${1:-} == commit ]]; then switched=false; fi
+      return 0
+    fi
     sleep 1
   done
   return 1
@@ -83,6 +110,7 @@ printf '%s\n' "$revision" > "$stage/app/REVISION"
 # Generate with the unprivileged service user; root copies into a protected
 # candidate beside the live file before staged-release validation.
 cp -p "$CONFIG/detection.json" "$config_backup/detection.json"
+fsync_paths "$config_backup/detection.json" "$config_backup" "$CONFIG"
 cp "$config_backup/detection.json" "$stage/detection-source.json"
 chown christmasdust:christmasdust "$stage/detection-source.json"
 chmod 0600 "$stage/detection-source.json"
@@ -101,15 +129,20 @@ fi
   import {loadGeoip} from "./src/services/geoip.js";
   const c=readConfig(); await loadDetection(process.argv[1]); await loadGeoip(c.geoipPath);' \
   "$detection_validation_path")
-release="$ROOT/releases/$(date -u +%Y%m%dT%H%M%S)-${revision:0:12}"
+release="$ROOT/releases/$(date -u +%Y%m%dT%H%M%S)-${revision:0:12}-${stage##*.}"
 [[ ! -e $release ]]
 mv "$stage/app" "$release"
 chown -R root:root "$release"
 chmod -R a+rX,go-w "$release"
+# Flush the completed tree, including npm-installed files, before making it
+# reachable through current. The releases directory entry is then fsynced.
+sync -f "$release"
+fsync_paths "$ROOT/releases"
 switched=true
 systemctl stop christmasdust
 if [[ -f /var/lib/christmasdust/snapshot.json ]]; then
   cp -p /var/lib/christmasdust/snapshot.json "$snapshot_backup/snapshot.json"
+  fsync_paths "$snapshot_backup/snapshot.json" "$snapshot_backup" /var/lib
   snapshot_state=present
 else
   snapshot_state=absent
@@ -118,17 +151,48 @@ if [[ $migration_state == migrated ]] && ! cmp -s "$config_backup/detection.json
   echo 'Detection configuration changed during update; retrying is safe.' >&2
   false
 fi
+[[ ! -e $ROOT/next-link || -L $ROOT/next-link ]]
+rm -f "$ROOT/next-link" # A prior interrupted update may have left it.
 ln -s "$release" "$ROOT/next-link"
+fsync_paths "$ROOT"
 mv -Tf "$ROOT/next-link" "$ROOT/current"
+# This directory fsync is the durability barrier: the new release pointer
+# must be on disk before a v2-only detection file can be committed.
+fsync_paths "$ROOT"
 if [[ $migration_state == migrated ]]; then
   config_switched=true
+  fsync_paths "$config_candidate" "$CONFIG"
   mv -Tf "$config_candidate" "$CONFIG/detection.json"
+  fsync_paths "$CONFIG"
 fi
 systemctl reset-failed christmasdust || true
 systemctl start christmasdust
-health
-# Keep the management command in sync only after the candidate passes health.
-install -m 0755 "$release/scripts/christmasdust" /usr/local/bin/christmasdust
-printf '%s\n' "$channel" > "$CONFIG/channel"
-switched=false
+health commit
+# Readiness and revision verification commit the application/config transaction.
+# Ancillary failures below must never roll back a healthy candidate.
+trap - ERR INT TERM
+finalization_failed=false
+if management_candidate=$(mktemp /usr/local/bin/.christmasdust.XXXXXXXX) &&
+  install -m 0755 "$release/scripts/christmasdust" "$management_candidate" &&
+  fsync_paths "$management_candidate" /usr/local/bin &&
+  mv -Tf "$management_candidate" /usr/local/bin/christmasdust &&
+  fsync_paths /usr/local/bin; then
+  :
+else
+  echo 'Application is healthy, but refreshing the management command failed.' >&2
+  finalization_failed=true
+fi
+if channel_candidate=$(mktemp "$CONFIG/.channel-candidate.XXXXXXXX") &&
+  printf '%s\n' "$channel" > "$channel_candidate" &&
+  chown --reference="$CONFIG/channel" "$channel_candidate" &&
+  chmod --reference="$CONFIG/channel" "$channel_candidate" &&
+  fsync_paths "$channel_candidate" "$CONFIG" &&
+  mv -Tf "$channel_candidate" "$CONFIG/channel" &&
+  fsync_paths "$CONFIG"; then
+  :
+else
+  echo 'Application is healthy, but saving the update channel failed.' >&2
+  finalization_failed=true
+fi
 echo "ChristmasDust updated to $revision. Previous release retained: ${previous:-none}"
+[[ $finalization_failed == false ]]
