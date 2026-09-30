@@ -20,7 +20,7 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | DETECTION_PATH | ./config/detection.json | Required classification/include/exclude JSON; native installs require an absolute path |
 | DISCOVERY_MODE | auto | auto uses Steam if key supplied; steam requires key; seeds disables Steam |
 | STEAM_API_KEY | empty | 32-character hexadecimal Steam Web API key; backend only |
-| GEOIP_PATH | empty | Optional local GeoLite2 City MMDB for server country and coordinates; native example: `/var/lib/christmasdust/geoip/GeoLite2-City.mmdb`; unreadable configured file fails startup |
+| GEOIP_PATH | empty | Optional local GeoLite2 City MMDB for server country and coordinates; native example: `/var/lib/christmasdust-geoip/GeoLite2-City.mmdb`; unreadable configured file fails startup |
 | TRUSTED_PROXIES | empty | Comma-separated literal IPs/CIDRs trusted for Express forwarded IP handling |
 | TRUST_CF_COUNTRY | false | Accept CF-IPCountry only from a trusted immediate peer; requires trusted proxies |
 | ADMIN_TOKEN | empty | Disables admin API when empty; otherwise at least 32 non-whitespace characters |

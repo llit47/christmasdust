@@ -42,14 +42,14 @@ export async function atomicReplace(path, contents, { mode, uid, gid, mustExist 
   }
 }
 
-export async function configureGeoip(path, account, license, dbDirectory) {
+export async function configureGeoip(path, account, license, dbDirectory, sourcePath = path) {
   if (!/^[0-9]+$/.test(account) || !/^[A-Za-z0-9_-]+$/.test(license)) throw new Error('Invalid MaxMind credentials');
-  const old = await lstat(path).catch(error => {
+  const old = await lstat(sourcePath).catch(error => {
     if (error.code === 'ENOENT') return null;
     throw error;
   });
-  if (old && !old.isFile()) throw new Error(`${path} must be a regular file`);
-  const existing = await readFile(path, 'utf8').catch(error => {
+  if (old && !old.isFile()) throw new Error(`${sourcePath} must be a regular file`);
+  const existing = await readFile(sourcePath, 'utf8').catch(error => {
     if (error.code === 'ENOENT') return '';
     throw error;
   });
@@ -87,7 +87,7 @@ export async function protectDatabase(path, gid) {
 
 if (process.argv[1]?.endsWith('/geoip-files.js')) {
   try {
-    const [action, path, argument] = process.argv.slice(2);
+    const [action, path, argument, sourcePath] = process.argv.slice(2);
     if (action === 'configure') {
       const input = await new Promise((resolve, reject) => {
         let data = '';
@@ -97,7 +97,7 @@ if (process.argv[1]?.endsWith('/geoip-files.js')) {
         process.stdin.on('error', reject);
       });
       const [account, license] = input.split('\n');
-      await configureGeoip(path, account, license, argument);
+      await configureGeoip(path, account, license, argument, sourcePath);
     } else if (action === 'environment') await configureEnvironment(path, argument);
     else if (action === 'restore') await restoreEnvironment(path, argument);
     else if (action === 'protect') await protectDatabase(path, Number(argument));

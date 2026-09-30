@@ -24,7 +24,8 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/christmasdust/christmasdust.env | Protected persistent application environment |
 | /etc/christmasdust/detection.json | Protected classification, include/exclude lists |
 | /etc/christmasdust/channel | Update branch/tag |
-| /var/lib/christmasdust/ | Persistent snapshot and optional operator-installed local MMDB |
+| /var/lib/christmasdust/ | Persistent snapshot |
+| /var/lib/christmasdust-geoip/ | Optional root-controlled local GeoLite2 City MMDB |
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
 | /usr/local/bin/christmasdust | Update/version/GeoIP setup command |
 
@@ -38,7 +39,7 @@ After installing or upgrading, obtain a [MaxMind account and license key](https:
 sudo christmasdust setup-geoip
 ```
 
-The command asks for AccountID and a hidden LicenseKey. It installs `geoipupdate` if needed, prepares the root-owned database directory, writes `/etc/GeoIP.conf` as root-only (`0600`), downloads GeoLite2 City, sets service-readable database permissions, atomically updates `GEOIP_PATH` without changing other environment settings, restarts ChristmasDust, and verifies readiness. It is safe to rerun. `/etc/GeoIP.conf` is a system-wide geoipupdate configuration; setup selects the City edition and its ChristmasDust database directory while preserving unrelated settings. Never put the license key in shell history or the app environment file.
+The command asks for AccountID and a hidden LicenseKey. It installs `geoipupdate` if needed, tests the new credentials and City database in temporary root-controlled locations, then prepares `/var/lib/christmasdust-geoip` as root:christmasdust `0750`. Only after validation does it replace `/etc/GeoIP.conf` (root-only `0600`) and the database, atomically update `GEOIP_PATH` without changing other environment settings, restart ChristmasDust, and verify readiness. A failed validation leaves the working config and database intact; a failure before readiness restores them. It is safe to rerun. `/etc/GeoIP.conf` is a system-wide geoipupdate configuration; setup selects the City edition and its ChristmasDust database directory while preserving unrelated settings. Never put the license key in shell history or the app environment file.
 
 When the distro supplies `geoipupdate.timer`, setup enables it and adds a small `geoipupdate.service` post-hook: refreshed database files become root:christmasdust `0640`, then the running app restarts to load the new MMDB. No extra scheduler is installed. If the timer is unavailable, arrange refreshes through the distro service or rerun setup. Running the `geoipupdate` binary directly bypasses the service post-hook. Check `/api/servers`: `meta.serverGeoipConfigured` should be `true`; matched servers with database records should have country and coordinates. Without GeoIP, browsing still works and the Country control explains why filtering is unavailable. Location is approximate; see [MaxMind's update guidance](https://dev.maxmind.com/geoip/updating-databases/).
 

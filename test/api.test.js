@@ -23,7 +23,7 @@ test('server snapshot reports whether server GeoIP is configured without visitor
   const absent = await fixture(t);
   const absentBody = await (await absent.get('/api/servers')).json();
   assert.equal(absentBody.meta.serverGeoipConfigured, false);
-  const configured = await fixture(t, { GEOIP_PATH: '/var/lib/christmasdust/geoip/GeoLite2-City.mmdb' });
+  const configured = await fixture(t, { GEOIP_PATH: '/var/lib/christmasdust-geoip/GeoLite2-City.mmdb' });
   configured.monitor.snapshot = () => ({ servers: [{ id: '8.8.8.8:27015', countryCode: 'DE', country: 'Germany', latitude: 52.52, longitude: 13.405 }], meta: {} });
   const body = await (await configured.get('/api/servers')).json();
   assert.equal(body.meta.serverGeoipConfigured, true);
