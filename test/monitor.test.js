@@ -40,6 +40,34 @@ test('failed queries preserve last good data, timestamps and progressively degra
   advance(180000); assert.equal(monitor.snapshot().meta.stale, true); assert.equal(monitor.snapshot().servers[0].stale, true);
   monitor.discover = async () => { throw Error('upstream'); }; await monitor.run('discovery'); assert.equal(monitor.servers.size, 2);
 });
+test('incomplete successful GameDig responses preserve last good metadata', async () => {
+  let live = { name: 'Christmas Server', map: 'de_xmas', numplayers: 20, maxplayers: 32,
+    password: true, ping: 42, raw: { numbots: 3 } };
+  const { monitor } = fixture({ query: async () => live });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  live = { name: 'Christmas Server', numplayers: 12 };
+  await monitor.run('live');
+  const row = monitor.servers.get(a.id);
+  assert.deepEqual({ name: row.name, map: row.map, players: row.players, maxPlayers: row.maxPlayers,
+    password: row.password, backendQueryMs: row.backendQueryMs, bots: row.bots },
+  { name: 'Christmas Server', map: 'de_xmas', players: 12, maxPlayers: 32,
+    password: true, backendQueryMs: 42, bots: 3 });
+  assert.equal(row.classification.confidence, 'high');
+});
+test('explicit GameDig zero counts and false password replace prior values', async () => {
+  let live = { name: 'Christmas Server', map: 'de_xmas', numplayers: 20, maxplayers: 32,
+    password: true, ping: 42, raw: { numbots: 3 } };
+  const { monitor } = fixture({ query: async () => live });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  live = { name: '', map: '', numplayers: 0, maxplayers: 0, password: false, ping: 0, raw: { numbots: 0 } };
+  await monitor.run('live');
+  const row = monitor.servers.get(a.id);
+  assert.deepEqual({ name: row.name, map: row.map, players: row.players, maxPlayers: row.maxPlayers,
+    password: row.password, backendQueryMs: row.backendQueryMs, bots: row.bots },
+  { name: 'Christmas Server', map: 'de_xmas', players: 0, maxPlayers: 0,
+    password: false, backendQueryMs: 0, bots: 0 });
+  assert.equal(row.themeMisses, 0);
+});
 test('one live failure does not abort successful queries', async () => {
   const { monitor } = fixture({ query: async row => { if (row.id === b.id) throw Error(); return { name: 'snow', numplayers: 3 }; } });
   await monitor.init(); await monitor.run('discovery'); await monitor.run('live');

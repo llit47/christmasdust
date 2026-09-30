@@ -20,6 +20,7 @@ stage=$(mktemp -d "$ROOT/releases/staging.XXXXXXXX")
 chown christmasdust:christmasdust "$stage"
 switched=false
 snapshot_backup=$(mktemp -d /var/lib/christmasdust-update.XXXXXXXX)
+snapshot_state=unrecorded
 cleanup() { rm -rf -- "$stage" "$snapshot_backup"; }
 rollback() {
   local result=$?
@@ -29,8 +30,10 @@ rollback() {
     systemctl stop christmasdust || true
     ln -s "$previous" "$ROOT/rollback-link"
     mv -Tf "$ROOT/rollback-link" "$ROOT/current"
-    if [[ -f $snapshot_backup/snapshot.json ]]; then
+    if [[ $snapshot_state == present ]]; then
       cp -p "$snapshot_backup/snapshot.json" /var/lib/christmasdust/snapshot.json
+    elif [[ $snapshot_state == absent ]]; then
+      rm -f /var/lib/christmasdust/snapshot.json
     fi
     systemctl reset-failed christmasdust || true
     systemctl start christmasdust || true
@@ -76,7 +79,12 @@ chown -R root:root "$release"
 chmod -R a+rX,go-w "$release"
 switched=true
 systemctl stop christmasdust
-if [[ -f /var/lib/christmasdust/snapshot.json ]]; then cp -p /var/lib/christmasdust/snapshot.json "$snapshot_backup/snapshot.json"; fi
+if [[ -f /var/lib/christmasdust/snapshot.json ]]; then
+  cp -p /var/lib/christmasdust/snapshot.json "$snapshot_backup/snapshot.json"
+  snapshot_state=present
+else
+  snapshot_state=absent
+fi
 ln -s "$release" "$ROOT/next-link"
 mv -Tf "$ROOT/next-link" "$ROOT/current"
 systemctl reset-failed christmasdust || true

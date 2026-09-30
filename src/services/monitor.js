@@ -1,5 +1,5 @@
 import { classify } from '../domain/classify.js';
-import { metadata, cleanText } from '../domain/server.js';
+import { metadata, liveMetadata, cleanText } from '../domain/server.js';
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
 export class Monitor {
@@ -76,7 +76,7 @@ export class Monitor {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...metadata(raw), ...this.geoip(row.ip),
+          return { ...row, ...liveMetadata(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags }, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });

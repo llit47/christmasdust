@@ -22,7 +22,8 @@ test('configuration defaults and strict validation', () => {
 });
 test('address normalization, invalid endpoints and private network denial', () => {
   assert.deepEqual(parseAddress('8.8.8.8:00080'), { id: '8.8.8.8:80', ip: '8.8.8.8', port: 80 });
-  for (const value of ['localhost:27015', '[::1]:27015', '127.0.0.1:27015', '10.1.1.1:2', '169.254.169.254:80', '100.64.1.1:80', '192.168.1.1:2', '172.31.1.1:2', '0.0.0.0:2', '224.0.0.1:2', '240.0.0.1:27015', '8.8.8.8:0', '8.8.8.8:65536', '8.8.8.8:80/path', '8.8.8.8:80\n', '008.8.8.8:80']) assert.throws(() => parseAddress(value), value);
+  assert.deepEqual(parseAddress('192.0.1.1:27015'), { id: '192.0.1.1:27015', ip: '192.0.1.1', port: 27015 });
+  for (const value of ['localhost:27015', '[::1]:27015', '127.0.0.1:27015', '10.1.1.1:2', '169.254.169.254:80', '100.64.1.1:80', '192.0.0.1:27015', '192.0.2.1:27015', '192.168.1.1:2', '172.31.1.1:2', '0.0.0.0:2', '224.0.0.1:2', '240.0.0.1:27015', '8.8.8.8:0', '8.8.8.8:65536', '8.8.8.8:80/path', '8.8.8.8:80\n', '008.8.8.8:80']) assert.throws(() => parseAddress(value), value);
 });
 test('explainable multilingual confidence and curation', () => {
   for (const name of ['Christmas', 'XMAS', 'Święta', 'Noël', 'Weihnachten']) assert.equal(classify({ name }, rules).confidence, 'high');
