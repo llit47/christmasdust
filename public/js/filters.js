@@ -15,6 +15,7 @@ export function countryFilterState(servers, configured) {
 export function filterServers(servers, filters, favoriteIds) {
   const query = filters.search.trim().toLowerCase();
   return servers.filter(row =>
+    row.status === 'online' &&
     row.stale !== true &&
     (!query || `${row.name} ${row.map} ${row.id}`.toLowerCase().includes(query)) &&
     (!filters.country || row.countryCode === filters.country) &&
@@ -22,6 +23,5 @@ export function filterServers(servers, filters, favoriteIds) {
     (!filters.confidence || row.classification.confidence === filters.confidence) &&
     (!filters.slots || (row.status === 'online' && !row.stale && row.maxPlayers > row.players && !row.password)) &&
     (!filters.favorites || isFavorite(row, favoriteIds)) &&
-    (!filters.online || (row.status === 'online' && !row.stale)) &&
     (!filters.hideEmpty || row.players !== 0));
 }
