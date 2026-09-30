@@ -8,3 +8,4 @@ Initial Christmas server browser: Steam discovery, GameDig monitoring, resilient
 - Add a vetted Christmas map catalog and bounded exact-map discovery alongside regional and name searches.
 - Version detection configuration and migrate legacy operator files transactionally during native updates.
 - Show server countries from a local City MMDB when configured, explain unavailable country filtering, and add a frontend-only Hide empty servers control.
+- Add `sudo christmasdust setup-geoip` for native MaxMind download, protected configuration, periodic refresh and app reload.

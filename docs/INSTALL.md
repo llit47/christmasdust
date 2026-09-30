@@ -26,36 +26,21 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/christmasdust/channel | Update branch/tag |
 | /var/lib/christmasdust/ | Persistent snapshot and optional operator-installed local MMDB |
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
-| /usr/local/bin/christmasdust | Update/version command |
+| /usr/local/bin/christmasdust | Update/version/GeoIP setup command |
 
 Set a Steam key or curated addresses before expecting results. Add `GEOIP_PATH` for server country filtering and approximate distance. Restart after changing config. Readiness checks verify startup and restored storage initialization, not Steam availability or the presence of matching servers.
 
 ## Server country data (optional)
 
-After installing or upgrading ChristmasDust, prepare the database directory once:
+After installing or upgrading, obtain a [MaxMind account and license key](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/), then run:
 
 ```sh
-sudo install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
+sudo christmasdust setup-geoip
 ```
 
-The installer and updater do not download a licensed database or manage this directory. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
+The command asks for AccountID and a hidden LicenseKey. It installs `geoipupdate` if needed, prepares the root-owned database directory, writes `/etc/GeoIP.conf` as root-only (`0600`), downloads GeoLite2 City, sets service-readable database permissions, atomically updates `GEOIP_PATH` without changing other environment settings, restarts ChristmasDust, and verifies readiness. It is safe to rerun. `/etc/GeoIP.conf` is a system-wide geoipupdate configuration; setup selects the City edition and its ChristmasDust database directory while preserving unrelated settings. Never put the license key in shell history or the app environment file.
 
-```text
-AccountID YOUR_ACCOUNT_ID
-LicenseKey YOUR_LICENSE_KEY
-EditionIDs GeoLite2-City
-DatabaseDirectory /var/lib/christmasdust/geoip
-```
-
-Protect the credentials with `sudo chmod 0600 /etc/GeoIP.conf`, run `sudo geoipupdate`, and make the database readable to the service:
-
-```sh
-sudo chgrp christmasdust /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
-sudo chmod 0640 /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
-sudo -u christmasdust test -r /var/lib/christmasdust/geoip/GeoLite2-City.mmdb
-```
-
-Set `GEOIP_PATH=/var/lib/christmasdust/geoip/GeoLite2-City.mmdb` in `/etc/christmasdust/christmasdust.env`, then `sudo systemctl restart christmasdust`. Check `/api/servers`: `meta.serverGeoipConfigured` should be `true`, and matched servers with database records should have `countryCode`, `country`, `latitude` and `longitude`. Arrange recurring `geoipupdate`, verify the replacement file remains service-readable, and restart ChristmasDust to load each new database. If no database is configured, browsing still works and the Country control explains why it is unavailable. The database is approximate; see [MaxMind's update guidance](https://dev.maxmind.com/geoip/updating-databases/).
+When the distro supplies `geoipupdate.timer`, setup enables it and adds a small `geoipupdate.service` post-hook: refreshed database files become root:christmasdust `0640`, then the running app restarts to load the new MMDB. No extra scheduler is installed. If the timer is unavailable, arrange refreshes through the distro service or rerun setup. Running the `geoipupdate` binary directly bypasses the service post-hook. Check `/api/servers`: `meta.serverGeoipConfigured` should be `true`; matched servers with database records should have country and coordinates. Without GeoIP, browsing still works and the Country control explains why filtering is unavailable. Location is approximate; see [MaxMind's update guidance](https://dev.maxmind.com/geoip/updating-databases/).
 
 ## Reverse proxy
 
