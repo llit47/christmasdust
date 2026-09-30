@@ -14,8 +14,6 @@ sudo bash install.sh
 
 The environment variable `CHRISTMASDUST_CHANNEL` selects a trusted Git branch or tag; it is the installer's only configuration override. Installation is noninteractive. Existing installations invoke the updater; it preserves the environment file and migrates supported legacy detection files transactionally. A preprovisioned environment file should be root:christmasdust 0640 and use the standard snapshot path for automatic snapshot rollback.
 
-For the first upgrade from an installation whose updater predates GeoIP directory provisioning, run the current `install.sh` once. It prepares the directory before handing control to the old installed updater, so this takes one update. Invoking that old `christmasdust update` command directly cannot run the new provisioning step. Later `christmasdust update` runs provision it directly.
-
 The installer installs OS prerequisites, downloads the latest official Node 24 LTS binary into `/opt/christmasdust/node`, verifies its SHA256 against the official HTTPS manifest, creates the service user, and installs:
 
 | Path | Contents |
@@ -26,7 +24,7 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/christmasdust/christmasdust.env | Protected persistent application environment |
 | /etc/christmasdust/detection.json | Protected classification, include/exclude lists |
 | /etc/christmasdust/channel | Update branch/tag |
-| /var/lib/christmasdust/ | Persistent snapshot and prepared `geoip/` directory for an optional local MMDB |
+| /var/lib/christmasdust/ | Persistent snapshot and optional operator-installed local MMDB |
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
 | /usr/local/bin/christmasdust | Update/version command |
 
@@ -34,7 +32,13 @@ Set a Steam key or curated addresses before expecting results. Add `GEOIP_PATH` 
 
 ## Server country data (optional)
 
-The native installer and updater prepare `/var/lib/christmasdust/geoip/` as `root:christmasdust` with mode `0750`, including on older installations, but do not download a licensed database. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
+After installing or upgrading ChristmasDust, prepare the database directory once:
+
+```sh
+sudo install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
+```
+
+The installer and updater do not download a licensed database or manage this directory. Obtain a MaxMind account and license key, then install [MaxMind's GeoIP Update](https://github.com/maxmind/geoipupdate) (for example, `sudo apt-get install geoipupdate`). In its protected `/etc/GeoIP.conf`, set:
 
 ```text
 AccountID YOUR_ACCOUNT_ID
