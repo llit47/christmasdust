@@ -135,7 +135,7 @@ test('favorites follow any grouped endpoint when the representative changes', ()
   const [oldId, newId] = endpoints;
   const favorites = new Set([oldId]);
   const group = { id: newId, duplicateEndpoints: [oldId], name: 'Christmas Dust', map: 'de_xmas',
-    players: 12, classification: { confidence: 'high' } };
+    players: 12, status: 'online', classification: { confidence: 'high' } };
   const filters = { search: '', country: '', map: '', confidence: '', slots: false,
     favorites: true, hideEmpty: false };
   assert.equal(isFavorite(group, favorites), true);

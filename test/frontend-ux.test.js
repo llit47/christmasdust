@@ -29,8 +29,9 @@ test('Country stays manual and Online only is absent from the frontend', async (
   assert.doesNotMatch(html, /id="online"|Online only/);
   assert.doesNotMatch(app, /\$\('online'\)/);
   const rows = [{ id: 'offline', name: 'Xmas', map: 'de_xmas', players: 3, status: 'offline', stale: false,
-    classification: { confidence: 'high' } }];
+    classification: { confidence: 'high' } }, { id: 'online', name: 'Xmas', map: 'de_xmas', players: 2,
+    status: 'online', stale: false, classification: { confidence: 'high' } }];
   const filters = { search: '', country: '', map: '', confidence: '', slots: false,
-    favorites: false, hideEmpty: false, online: true };
-  assert.deepEqual(filterServers(rows, filters, new Set()), rows);
+    favorites: false, hideEmpty: false };
+  assert.deepEqual(filterServers(rows, filters, new Set()), [rows[1]]);
 });

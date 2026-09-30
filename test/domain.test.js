@@ -101,9 +101,9 @@ test('recommended ranking prefers Christmas relevance before country and proximi
 });
 test('country options and country filtering use located servers without dropping other filters', () => {
   const rows = [
-    { id: 'a', name: 'Christmas DE', map: 'de_xmas', countryCode: 'DE', country: 'Germany', players: 0, classification: { confidence: 'high' } },
-    { id: 'b', name: 'Christmas US', map: 'de_xmas', countryCode: 'US', country: 'United States', players: 3, classification: { confidence: 'high' } },
-    { id: 'c', name: 'Christmas unknown', map: 'de_xmas', countryCode: null, players: 4, classification: { confidence: 'high' } }
+    { id: 'a', name: 'Christmas DE', map: 'de_xmas', countryCode: 'DE', country: 'Germany', players: 0, status: 'online', classification: { confidence: 'high' } },
+    { id: 'b', name: 'Christmas US', map: 'de_xmas', countryCode: 'US', country: 'United States', players: 3, status: 'online', classification: { confidence: 'high' } },
+    { id: 'c', name: 'Christmas unknown', map: 'de_xmas', countryCode: null, players: 4, status: 'online', classification: { confidence: 'high' } }
   ];
   assert.deepEqual(countryOptions(rows), [['DE', 'Germany'], ['US', 'United States']]);
   assert.deepEqual(countryFilterState(rows, false), { choices: [], disabled: true,
@@ -113,7 +113,7 @@ test('country options and country filtering use located servers without dropping
     favorites: false, hideEmpty: false }, new Set()).map(row => row.id), ['a']);
 });
 test('Hide empty servers is frontend-only and unchecking restores zero-player rows', () => {
-  const rows = [{ id: 'empty', players: 0 }, { id: 'occupied', players: 2 }];
+  const rows = [{ id: 'empty', players: 0, status: 'online' }, { id: 'occupied', players: 2, status: 'online' }];
   const filters = { search: '', country: '', map: '', confidence: '', slots: false,
     favorites: false, hideEmpty: true };
   assert.deepEqual(filterServers(rows, filters, new Set()).map(row => row.id), ['occupied']);
