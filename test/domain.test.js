@@ -121,6 +121,24 @@ test('Hide empty servers is frontend-only and unchecking restores zero-player ro
   assert.deepEqual(filterServers(rows, filters, new Set()).map(row => row.id), ['empty', 'occupied']);
   assert.equal(rows[0].players, 0);
 });
+test('stale servers are absent from frontend results, counts and country choices', () => {
+  const rows = [
+    { id: 'stale', name: 'Christmas stale', map: 'de_xmas', countryCode: 'DE', country: 'Germany', players: 24, status: 'online', stale: true, classification: { confidence: 'high' } },
+    { id: 'fresh', name: 'Christmas fresh', map: 'de_dust2', countryCode: 'US', country: 'United States', players: 3, status: 'online', stale: false, classification: { confidence: 'high' } }
+  ];
+  const filters = { search: '', country: '', map: '', confidence: '', slots: false,
+    favorites: false, online: false, hideEmpty: false };
+  const visible = filterServers(rows, filters, new Set());
+  assert.deepEqual(visible.map(row => row.id), ['fresh']);
+  assert.equal(visible.length, 1);
+  assert.equal(visible.reduce((sum, row) => sum + row.players, 0), 3);
+  assert.deepEqual(countryOptions(rows), [['US', 'United States']]);
+  filters.online = true;
+  assert.deepEqual(filterServers(rows, filters, new Set()).map(row => row.id), ['fresh']);
+  filters.online = false; filters.search = 'stale';
+  assert.deepEqual(filterServers(rows, filters, new Set()), []);
+  assert.equal(rows[0].stale, true);
+});
 test('external strings are assigned as text and cannot become links', () => {
   const hostile = '<img src=x onerror=alert(1)>';
   const document = { createElement: tag => ({ tag, set innerHTML(_) { throw Error('unsafe'); } }) };

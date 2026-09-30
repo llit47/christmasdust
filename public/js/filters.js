@@ -1,7 +1,7 @@
 import { isFavorite } from './favorites.js';
 
 export function countryOptions(servers) {
-  return [...new Map(servers.filter(row => /^[A-Z]{2}$/.test(row.countryCode ?? ''))
+  return [...new Map(servers.filter(row => row.stale !== true && /^[A-Z]{2}$/.test(row.countryCode ?? ''))
     .map(row => [row.countryCode, row.country || row.countryCode]))]
     .sort((a, b) => a[1].localeCompare(b[1]));
 }
@@ -15,6 +15,7 @@ export function countryFilterState(servers, configured) {
 export function filterServers(servers, filters, favoriteIds) {
   const query = filters.search.trim().toLowerCase();
   return servers.filter(row =>
+    row.stale !== true &&
     (!query || `${row.name} ${row.map} ${row.id}`.toLowerCase().includes(query)) &&
     (!filters.country || row.countryCode === filters.country) &&
     (!filters.map || row.map === filters.map) &&
