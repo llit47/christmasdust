@@ -14,6 +14,8 @@ sudo bash install.sh
 
 The environment variable `CHRISTMASDUST_CHANNEL` selects a trusted Git branch or tag; it is the installer's only configuration override. Installation is noninteractive. Existing installations invoke the updater; it preserves the environment file and migrates supported legacy detection files transactionally. A preprovisioned environment file should be root:christmasdust 0640 and use the standard snapshot path for automatic snapshot rollback.
 
+For the first upgrade from an installation whose updater predates GeoIP directory provisioning, run the current `install.sh` once. It prepares the directory before handing control to the old installed updater, so this takes one update. Invoking that old `christmasdust update` command directly cannot run the new provisioning step. Later `christmasdust update` runs provision it directly.
+
 The installer installs OS prerequisites, downloads the latest official Node 24 LTS binary into `/opt/christmasdust/node`, verifies its SHA256 against the official HTTPS manifest, creates the service user, and installs:
 
 | Path | Contents |

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, symlink, readlink, rm, chmod, stat
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 // Exercise the real transaction script with temporary paths and fake OS/network commands.
 // This validates rollback logic, not a real systemd installation or package download.
 const legacy = { strong: ['christmas', 'xmas', 'santa', 'noel', 'weihnacht', 'swieta'],
@@ -42,7 +43,8 @@ exec ${process.execPath} "$@"
     await writeFile(join(dir, 'fixture', file), await readFile(new URL(`../${file}`, import.meta.url)));
   if (failure === 'validation') await writeFile(join(dir, 'fixture/config/christmas-maps.json'), '{"strong":["duplicate"],"probable":["duplicate"]}');
   await writeFile(join(dir, 'fixture/src/services/geoip.js'), 'export const loadGeoip=async()=>()=>({});');
-  await writeFile(join(dir, 'fixture/scripts/christmasdust'), '#!/bin/bash\nexit 0\n');
+  await writeFile(join(dir, 'fixture/scripts/christmasdust'), options.oldUpdaterBootstrap
+    ? await readFile(new URL('../scripts/christmasdust', import.meta.url)) : '#!/bin/bash\nexit 0\n');
   if (options.existingGeoipMode !== undefined) { await mkdir(join(dir, 'lib/geoip')); await chmod(join(dir, 'lib/geoip'), options.existingGeoipMode); }
   const mocks = {
     runuser: 'shift 3; exec "$@"',
@@ -59,12 +61,34 @@ exec ${process.execPath} "$@"
   };
   for (const [name, body] of Object.entries(mocks)) await writeFile(join(dir, 'bin', name), `#!/bin/bash\nset -eu\n${body}\n`, { mode: 0o755 });
   let script = await readFile(new URL('../scripts/christmasdust', import.meta.url), 'utf8');
+  if (options.oldUpdaterBootstrap) {
+    // The installed pre-PR4 updater is this exact script without the GeoIP
+    // provisioning stanza. Pin its hash so this fixture cannot drift silently.
+    const provision = `# Existing native installs may predate the optional GeoIP directory. Prepare
+# it before staged validation, using the same ownership/mode as fresh installs.
+[[ ! -L /var/lib/christmasdust/geoip ]] || { echo 'GeoIP directory must not be a symlink.' >&2; exit 1; }
+install -d -o root -g christmasdust -m 0750 /var/lib/christmasdust/geoip
+`;
+    assert.ok(script.includes(provision));
+    script = script.replace(provision, '');
+    assert.equal(createHash('sha256').update(script).digest('hex'), '26c7a043149c58058cf9251a88f5aef9af731e73b91661273185f7078806fac7');
+  }
   script = script.replaceAll('/opt/christmasdust', join(dir, 'root')).replaceAll('/etc/christmasdust', join(dir, 'etc'))
     .replaceAll('/var/lib/christmasdust', join(dir, 'lib')).replaceAll('/run/lock/christmasdust-update.lock', join(dir, 'lock'))
     .replaceAll('/usr/local/bin', join(dir, 'bin')).replace('[[ $EUID == 0 ]]', 'true')
     .replace('/usr/sbin:/usr/bin:/sbin:/bin', `${join(dir, 'bin')}:/usr/sbin:/usr/bin:/sbin:/bin`);
-  const scriptPath = join(dir, 'updater'); await writeFile(scriptPath, script);
-  const run = () => spawnSync('bash', [scriptPath, 'update'], { env: { ...process.env, DEPLOY_TEST_DIR: dir,
+  const scriptPath = options.oldUpdaterBootstrap ? join(dir, 'bin/christmasdust') : join(dir, 'updater');
+  await writeFile(scriptPath, script, { mode: 0o755 });
+  let entry = scriptPath; let args = ['update'];
+  if (options.oldUpdaterBootstrap) {
+    let installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+    installer = installer.replaceAll('/opt/christmasdust', join(dir, 'root')).replaceAll('/etc/christmasdust', join(dir, 'etc'))
+      .replaceAll('/var/lib/christmasdust', join(dir, 'lib')).replaceAll('/usr/local/bin', join(dir, 'bin'))
+      .replace('[[ $EUID == 0 ]]', 'true').replace('[[ -d /run/systemd/system ]]', 'true');
+    entry = join(dir, 'installer'); args = [];
+    await writeFile(entry, installer);
+  }
+  const run = () => spawnSync('bash', [entry, ...args], { env: { ...process.env, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, DEPLOY_TEST_DIR: dir,
     DEPLOY_TEST_DETECTION_PATH: detectionPath, DEPLOY_TEST_BACKUP_PATH: backupPath, DEPLOY_TEST_FAILURE: failure }, encoding: 'utf8', timeout: 15000 });
   const firstResult = run();
   const result = options.repeatUpdate && firstResult.status === 0 ? run() : firstResult;
@@ -91,6 +115,14 @@ test('updater provisions the GeoIP directory when an existing installation lacks
   assert.equal(state.result.status, 0, state.result.stdout + state.result.stderr);
   assert.equal(state.geoipMode, 0o750);
   assert.match(state.events, /install:-d -o root -g christmasdust -m 0750 .*\/lib\/geoip/);
+});
+test('first upgrade through the installer provisions GeoIP before invoking the pre-PR4 installed updater', async t => {
+  const state = await transaction(t, '', true, legacyBytes, { oldUpdaterBootstrap: true });
+  assert.equal(state.result.status, 0, state.result.stdout + state.result.stderr);
+  assert.match(state.result.stdout, /Existing installation found/);
+  assert.equal(state.geoipMode, 0o750);
+  assert.equal(state.events.split('\n').filter(line => line.includes('install:-d -o root -g christmasdust -m 0750')).length, 1);
+  assert.notEqual(state.current, state.old);
 });
 test('updater corrects the GeoIP directory mode on an existing installation', async t => {
   const state = await transaction(t, '', true, legacyBytes, { existingGeoipMode: 0o755 });
