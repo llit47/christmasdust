@@ -17,7 +17,7 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | STALE_AFTER_MS | 180000 | Last successful live refresh becomes stale after this; at least live interval |
 | RETENTION_MS | 604800000 | Retain non-curated candidates without discovery/live success, or hidden candidates without a positive theme match, for this duration, 1 hour–30 days |
 | SNAPSHOT_PATH | ./data/snapshot.json | Atomic persistent snapshot file |
-| DETECTION_PATH | ./config/detection.json | Required classification/include/exclude JSON |
+| DETECTION_PATH | ./config/detection.json | Required classification/include/exclude JSON; native installs require an absolute path |
 | DISCOVERY_MODE | auto | auto uses Steam if key supplied; steam requires key; seeds disables Steam |
 | STEAM_API_KEY | empty | 32-character hexadecimal Steam Web API key; backend only |
 | GEOIP_PATH | empty | Optional local GeoLite2 City/Country MMDB; unreadable configured file fails startup |
@@ -49,6 +49,8 @@ The address above illustrates syntax only; it is **not** a game server recommend
 An unattended update migrates supported unversioned files to version 2, preserving includes, excludes and custom terms while moving the old built-in `santa` term to `related` and adding this release's new terms. Custom terms are retained before built-in additions; if a future migration reaches its version's term cap, optional defaults are skipped rather than deleting custom terms. Already-versioned files are not rewritten. Unsupported future versions and unknown keys fail validation. The updater restores the exact previous file if deployment fails; operators normally need no manual edit after updating. The map catalog is bundled with each release.
 
 An already-installed updater from before version 2 cannot retroactively perform the new disk migration during its first upgrade. The new application applies version 2 semantics to the untouched legacy file in memory, so the first upgrade works without editing it; the newly installed updater writes version 2 on its next run. This keeps the first upgrade safe for rollback to the old release.
+
+Native updates resolve `DETECTION_PATH` through the staged application config and require an existing regular file owned by root in a root-controlled directory. Candidates and restore files are created beside that file for atomic replacement. The first successful v1-to-v2 migration retains its exact legacy bytes in a root-only `rollback` subdirectory beside the configured file; later updates never overwrite that backup. Fresh v2 installations do not create one.
 
 ## GeoIP and proxy trust
 

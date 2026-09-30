@@ -16,9 +16,9 @@ Cadences are delays after completed cycles, not real-time deadlines. Slow cycles
 
 ## Update and rollback
 
-Updater takes a lock, clones the configured branch/tag into a separate staging directory, runs `npm ci --omit=dev --ignore-scripts`, tests and static checks. The staged release migrates legacy detection JSON into a separate candidate and validates that candidate plus environment/GeoIP before touching the live service. The updater keeps an exact backup and preserves file ownership/mode. It flushes the completed release, durably switches `current`, then flushes the migrated config file and its directory. The new application can read either legacy or v2 config, so a power loss between those steps leaves a compatible state. It starts the service and checks HTTP readiness and the expected Git revision for up to 30 attempts. Failure before those checks pass restores and flushes the exact old detection file and snapshot before switching the old release pointer back. Current-version detection files are left untouched; custom terms and include/exclude lists survive migration. Previous release directories are retained; temporary files are removed.
+Updater takes a lock, clones the configured branch/tag into a separate staging directory, runs `npm ci --omit=dev --ignore-scripts`, tests and static checks. The staged release resolves the absolute `DETECTION_PATH` from the protected environment file, migrates that file into a candidate beside it, and validates the candidate plus environment/GeoIP before touching the live service. It keeps an exact transaction backup and preserves file ownership/mode. Before committing v2, the first migration also durably saves the exact v1 file in a root-only `rollback` directory beside the configured detection file. This retained backup survives success and is never overwritten; a newly created backup is removed after a completed pre-commit rollback. The updater flushes the completed release, durably switches `current`, then flushes the migrated config file and its actual directory. The new application can read either legacy or v2 config, so a power loss between those steps leaves a compatible state. It starts the service and checks HTTP readiness and the expected Git revision for up to 30 attempts. Failure before those checks pass restores and flushes the exact old detection file and snapshot before switching the old release pointer back. Current-version detection files are left untouched; custom terms and include/exclude lists survive migration. Previous release directories are retained; temporary transaction files are removed.
 
-Readiness plus matching revision is the deployment commit point. Later failure to refresh the management command or save the channel is reported with a nonzero update status, but the healthy new release stays active. Do not manually edit `/etc/christmasdust/detection.json` while `christmasdust update` is running: concurrent manual edits are unsupported. The updater retains a simple pre-switch change check, but external editors do not participate in its lock.
+Readiness plus matching revision is the deployment commit point. Later failure to refresh the management command or save the channel is reported with a nonzero update status, but the healthy new release stays active. Do not manually edit the configured `DETECTION_PATH` while `christmasdust update` is running: concurrent manual edits are unsupported. The updater retains a simple pre-switch change check, but external editors do not participate in its lock.
 
 After a machine power loss during an update, the durable release/config pair remains compatible, but the interrupted health check cannot finish or automatically roll back. Check `systemctl status christmasdust` and `/api/ready`, then rerun the update or recover from the retained release if needed.
 
@@ -28,7 +28,24 @@ The standard snapshot path is `/var/lib/christmasdust/snapshot.json`. Custom sna
 
 The updater refreshes the management command only after successful health. It does not silently replace the systemd unit or Node runtime on regular application updates. Review future unit/runtime changes explicitly. Keep Node 24 security patches current using checksum-verified official binaries and restart; runtime upgrades should be staged separately. Release tags are supported by the same command; changing the channel is persisted only after a successful update.
 
-For manual application rollback, stop the service, atomically replace `/opt/christmasdust/current` with a symlink to the desired retained release, then start and check readiness. Confirm snapshot schema compatibility first. Retained releases consume disk; remove old inactive releases only after confirming they are neither the current target nor a needed rollback point. Back up `/etc/christmasdust` and `/var/lib/christmasdust` with access controls. Restore with correct ownership and restart.
+For manual application rollback, confirm snapshot schema compatibility first, then stop the service. If the retained release understands the current detection schema, repoint `/opt/christmasdust/current` and restart. A **pre-v2 release** also needs the preserved v1 config restored **before** its pointer is selected. For the default path, the exact v1 copy is `/etc/christmasdust/rollback/detection-v1.json`; for a custom `DETECTION_PATH`, it is `rollback/<detection-basename-without-.json>-v1.json` beside that file. Back up the current v2 file if you may need to return to it. With the service stopped, copy the v1 backup to a temporary file beside the configured detection file, atomically rename it over the live file, and flush that filesystem (`sync -f <detection-directory>`). Then create a symlink to the retained release, atomically rename it over `/opt/christmasdust/current`, flush `/opt/christmasdust`, start the service, and check `/api/ready`. Do not point a pre-v2 release at the v2 config. Retained releases consume disk; remove old inactive releases only after confirming they are neither the current target nor a needed rollback point. Back up operator config and data with access controls.
+
+For the default detection path, the schema-changing portion is:
+
+```sh
+sudo systemctl stop christmasdust
+sudo cp -p /etc/christmasdust/rollback/detection-v1.json /etc/christmasdust/.detection-manual-v1.tmp
+sudo sync -f /etc/christmasdust
+sudo mv -Tf /etc/christmasdust/.detection-manual-v1.tmp /etc/christmasdust/detection.json
+sudo sync -f /etc/christmasdust
+sudo ln -s /opt/christmasdust/releases/CHOSEN_OLD_RELEASE /opt/christmasdust/.manual-next-$$
+sudo mv -Tf /opt/christmasdust/.manual-next-$$ /opt/christmasdust/current
+sudo sync -f /opt/christmasdust
+sudo systemctl start christmasdust
+curl --noproxy '*' -fsS http://127.0.0.1:3001/api/ready
+```
+
+Use the actual retained release and configured detection path; the example name is a placeholder. Restore a compatible snapshot first if the snapshot schema changed.
 
 ## Troubleshooting
 
