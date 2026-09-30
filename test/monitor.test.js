@@ -305,12 +305,51 @@ test('exact Christmas map search finds a generic hostname and merges duplicate s
   assert.equal(result.servers.length, 1);
   assert.deepEqual(result.servers[0].discoverySources, ['regional', 'map:de_dust2_xmas']);
   assert.ok(filters.includes('\\appid\\10\\gamedir\\cstrike\\map\\de_dust2_xmas'));
-  assert.ok(filters.length <= 18);
+  assert.equal(filters.length, 33);
   const { monitor } = fixture({ discover });
   await monitor.init(); await monitor.run('discovery');
   assert.equal(monitor.snapshot().servers.length, 1);
   assert.equal(monitor.snapshot().servers[0].classification.confidence, 'high');
   assert.equal(Object.hasOwn(monitor.snapshot().servers[0], 'discoverySources'), false);
+});
+test('exact map discovery rotates across the full catalog with bounded requests despite failures', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const catalog = [...rules.maps.strong, ...rules.maps.probable];
+  let filters = [];
+  const discover = steamDiscovery(config, rules, async url => {
+    const filter = url.searchParams.get('filter'); filters.push(filter);
+    if (filter.endsWith(`map\\${catalog[0]}`)) throw Error('map search unavailable');
+    return new Response(JSON.stringify({ response: { servers: [] } }));
+  });
+  const covered = new Set();
+  for (let run = 0; run <= Math.ceil(catalog.length / 20); run++) {
+    filters = [];
+    const result = await discover();
+    const maps = filters.filter(filter => filter.includes('\\map\\')).map(filter => filter.split('\\map\\')[1]);
+    assert.deepEqual(maps, Array.from({ length: 20 }, (_, index) => catalog[(run * 20 + index) % catalog.length]));
+    assert.equal(new Set(maps).size, 20);
+    maps.forEach(map => covered.add(map));
+    assert.equal(filters.filter(filter => filter.includes('\\region\\')).length, 8);
+    assert.equal(filters.filter(filter => filter.includes('\\name_match\\')).length, 5);
+    assert.equal(filters.length, 33);
+    assert.equal(result.partial, maps.includes(catalog[0]));
+  }
+  assert.deepEqual(covered, new Set(catalog));
+});
+test('small map catalogs query each safe map once and retain at most five safe name searches', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const filters = [];
+  const discover = steamDiscovery(config, { ...rules, maps: {
+    strong: new Set(['de_christmas', 'unsafe\\region\\0']), probable: new Set(['de_aztec_hivers'])
+  } }, async url => {
+    filters.push(url.searchParams.get('filter'));
+    return new Response(JSON.stringify({ response: { servers: [] } }));
+  });
+  await discover(); await discover();
+  assert.equal(filters.length, 30);
+  assert.deepEqual(filters.filter(filter => filter.includes('\\map\\')).map(filter => filter.split('\\map\\')[1]),
+    ['de_christmas', 'de_aztec_hivers', 'de_christmas', 'de_aztec_hivers']);
+  assert.ok(filters.every(filter => !filter.includes('unsafe')));
 });
 test('multiple targeted searches return one logical endpoint', async () => {
   const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });

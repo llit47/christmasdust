@@ -11,14 +11,19 @@ export function targetedTerms(rules, limit = 8) {
 }
 // Public Steam Web API. Fixed origin; neither callers nor server metadata choose URLs.
 export function steamDiscovery(config, rules, fetcher = fetch) {
+  let mapCursor = 0;
   return async () => {
     if (config.discoveryMode === 'seeds' || !config.steamKey) return { servers: [], disabled: true, partial: false, successfulRequests: 0 };
-    const maps = [...(rules.maps?.strong || []), ...(rules.maps?.probable || [])]
-      .filter(map => /^[a-z0-9_]{3,32}$/.test(map)).slice(0, 5);
+    const catalog = [...(rules.maps?.strong || []), ...(rules.maps?.probable || [])]
+      .filter(map => /^[a-z0-9_]{3,32}$/.test(map));
+    // Advance even after partial failures so unavailable maps cannot starve later entries.
+    const maps = Array.from({ length: Math.min(20, catalog.length) }, (_, index) =>
+      catalog[(mapCursor + index) % catalog.length]);
+    mapCursor = catalog.length ? (mapCursor + maps.length) % catalog.length : 0;
     const requests = [
       ...Array.from({ length: 8 }, (_, region) => ({ filter: `\\appid\\10\\gamedir\\cstrike\\region\\${region}`, source: 'regional' })),
       ...maps.map(map => ({ filter: `\\appid\\10\\gamedir\\cstrike\\map\\${map}`, source: `map:${map}` })),
-      ...targetedTerms(rules, 10 - maps.length).map(term => ({ filter: `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`, source: `name:${term}` }))
+      ...targetedTerms(rules, 5).map(term => ({ filter: `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`, source: `name:${term}` }))
     ];
     const results = await mapLimit(requests, 2, async ({ filter, source }) => {
       const url = new URL('https://api.steampowered.com/IGameServersService/GetServerList/v1/');

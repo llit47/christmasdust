@@ -1,6 +1,6 @@
 # ✳ ChristmasDust
 
-**A little snow. A lot of Counter-Strike.** A fast, self-hosted browser for Christmas-themed Counter-Strike 1.6 servers.
+**A little snow. A lot of Counter-Strike.** A fast, self-hosted browser for Christmas- and winter-themed Counter-Strike 1.6 servers.
 
 A dark winter page opens straight into a server list: country, map, population, confidence, Steam connect and copy command. Filter by country, map, open slots and theme confidence; browser preferences, favorites and personally hidden servers stay in local storage. Optional location ranks approximate distances entirely in the browser. No account, tracking, frontend framework or database.
 
@@ -42,11 +42,11 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 
 ## Operation at a glance
 
-- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to ten bounded theme-name/exact-map searches every **10 minutes**; results are classified before monitoring.
+- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to 20 rotating exact-map searches and five safe theme-name searches every **10 minutes**; results are classified before monitoring.
 - Monitoring: GameDig **counterstrike16**, every **45 seconds**, eight concurrent queries, five-second attempt timeout.
 - Browser: polls only the cached snapshot every **30 seconds**, pauses while hidden.
 - Storage: atomic JSON snapshots; failures preserve last known data with explicit age and degraded status.
-- Classification: weighted, explainable Christmas signals from name, tags, optional description and map. `config/christmas-maps.json` distinguishes verified strong and probable maps; generic snow alone is insufficient. Curated inclusion stays separate. High confidence remains a heuristic.
+- Classification: weighted, explainable Christmas and winter signals from name, tags, optional description and map. `config/christmas-maps.json` distinguishes strong Christmas/New Year maps and probable verified winter maps; either catalog tier qualifies independently, while generic snow alone is insufficient. Curated inclusion stays separate. High confidence remains a heuristic.
 - Duplicate grouping: fresh matching A2S metadata and a usable Steam server identity share one public result. GoldSrc identity can come from a bounded `getchallenge steam` probe. The API reports other endpoint IDs and count; similar names alone remain separate, and all endpoints stay monitored.
 - Location: optional local GeoLite2 City MMDB, or explicitly trusted Cloudflare country headers; precise browser coordinates are never uploaded.
 

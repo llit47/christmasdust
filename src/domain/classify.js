@@ -22,7 +22,7 @@ export function classify(server, rules, curated = false) {
   const strongMap = rules.maps?.strong?.has(map) || false;
   const probableMap = !strongMap && (rules.maps?.probable?.has(map) || false);
   if (strongMap) add('map', 'known-strong-map', map, WEIGHT.knownStrongMap, `map: known Christmas map (${map})`);
-  else if (probableMap) add('map', 'known-probable-map', map, WEIGHT.knownProbableMap, `map: probable Christmas map (${map})`);
+  else if (probableMap) add('map', 'known-probable-map', map, WEIGHT.knownProbableMap, `map: verified winter map (${map})`);
 
   let explicit = false;
   let relatedIdentity = false;
@@ -57,13 +57,11 @@ export function classify(server, rules, curated = false) {
     add('discovery', 'targeted-discovery', 'targeted search', WEIGHT.targetedDiscovery);
 
   const score = signals.reduce((total, signal) => total + signal.points, 0);
-  const supportingIdentity = signals.some(signal => identityFields.includes(signal.field) && signal.points > 0);
   const independentFields = new Set(signals.filter(signal => signal.points > 1 && signal.field !== 'discovery').map(signal => signal.field));
   let confidence = 'none';
   if (curated) confidence = 'curated';
   else if (strongMap || (explicit && score >= HIGH_SCORE)) confidence = 'high';
-  else if (score >= PROBABLE_SCORE && ((probableMap && supportingIdentity) ||
-    (relatedIdentity && independentFields.size >= 2))) confidence = 'probable';
+  else if (probableMap || (score >= PROBABLE_SCORE && relatedIdentity && independentFields.size >= 2)) confidence = 'probable';
   return { confidence, score, signals, reasons: [ ...(curated ? ['Operator included'] : []),
     ...signals.filter(signal => signal.points > 1).map(signal => signal.reason) ] };
 }
