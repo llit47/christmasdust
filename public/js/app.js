@@ -30,7 +30,7 @@ function render() {
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position and open details during polling.
   $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, copy })));
-  if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
+  if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length && snapshot.servers.every(row => row.stale === true) ? 'No recently verified servers are available yet.' : snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
 }
 async function poll() {
   if (loading || document.hidden) return;
@@ -45,9 +45,9 @@ async function poll() {
     options('country', countries.choices, countries.disabled ? 'Countries unavailable' : 'All countries');
     $('country').disabled = countries.disabled;
     $('country-status').textContent = countries.message;
-    options('map', [...new Set(snapshot.servers.map(s => s.map).filter(Boolean))].sort().map(s => [s, s]), 'All maps');
+    options('map', [...new Set(snapshot.servers.filter(s => s.stale !== true).map(s => s.map).filter(Boolean))].sort().map(s => [s, s]), 'All maps');
     const messages = [];
-    if (snapshot.meta.stale) messages.push('The snapshot is stale. Last known details are shown; availability may have changed.');
+    if (snapshot.meta.stale) messages.push('The snapshot is stale. Waiting for fresh server data.');
     else if (snapshot.meta.degraded) messages.push('Some servers or discovery sources did not respond. Last known details are retained.');
     if (snapshot.meta.discoveryDisabled && !snapshot.servers.length) messages.push('Discovery is not configured. The operator can add a Steam API key or curated servers.');
     $('status').textContent = messages.join(' ');
@@ -56,7 +56,7 @@ async function poll() {
     if (!$('servers').contains(document.activeElement) && !$('servers').querySelector('details[open]')) render();
   } catch {
     if (snapshot) { snapshot.servers = snapshot.servers.map(row => ({ ...row, stale: true })); if (!$('servers').contains(document.activeElement)) render(); }
-    $('status').textContent = 'Could not reach the snapshot service. Retaining your last view; retrying automatically.'; }
+    $('status').textContent = 'Could not reach the snapshot service. Waiting for fresh server data; retrying automatically.'; }
   finally { loading = false; }
 }
 $('filters').addEventListener('submit', event => event.preventDefault());
