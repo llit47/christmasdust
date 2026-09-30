@@ -6,12 +6,13 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 // Exercise the real transaction script with temporary paths and fake OS/network commands.
 // This validates rollback logic, not a real systemd installation or package download.
-async function transaction(t, failure = '') {
+async function transaction(t, failure = '', initialSnapshot = true) {
   const dir = await mkdtemp(join(tmpdir(), 'christmasdust-deploy-')); t.after(() => rm(dir, { recursive: true, force: true }));
   for (const sub of ['root/releases/previous', 'root/node/bin', 'etc', 'lib', 'bin', 'fixture/src/config', 'fixture/src/services', 'fixture/scripts']) await mkdir(join(dir, sub), { recursive: true });
   const old = join(dir, 'root/releases/previous');
   await symlink(old, join(dir, 'root/current')); await symlink(process.execPath, join(dir, 'root/node/bin/node'));
-  await writeFile(join(old, 'REVISION'), 'old'); await writeFile(join(dir, 'lib/snapshot.json'), 'previous-snapshot');
+  await writeFile(join(old, 'REVISION'), 'old');
+  if (initialSnapshot) await writeFile(join(dir, 'lib/snapshot.json'), 'previous-snapshot');
   await writeFile(join(dir, 'etc/channel'), 'main'); await writeFile(join(dir, 'etc/christmasdust.env'), 'HOST=127.0.0.1\nPORT=3001\n');
   await writeFile(join(dir, 'fixture/package.json'), '{"type":"module"}');
   await writeFile(join(dir, 'fixture/src/config/index.js'), 'export const readConfig=()=>({}); export const loadDetection=async()=>({});');
@@ -34,7 +35,11 @@ async function transaction(t, failure = '') {
     .replace('/usr/sbin:/usr/bin:/sbin:/bin', `${join(dir, 'bin')}:/usr/sbin:/usr/bin:/sbin:/bin`);
   const scriptPath = join(dir, 'updater'); await writeFile(scriptPath, script);
   const result = spawnSync('bash', [scriptPath, 'update'], { env: { ...process.env, DEPLOY_TEST_DIR: dir, DEPLOY_TEST_FAILURE: failure }, encoding: 'utf8', timeout: 15000 });
-  return { result, current: await readlink(join(dir, 'root/current')), snapshot: await readFile(join(dir, 'lib/snapshot.json'), 'utf8'), old };
+  const snapshot = await readFile(join(dir, 'lib/snapshot.json'), 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  return { result, current: await readlink(join(dir, 'root/current')), snapshot, old };
 }
 test('updater commits a prepared, healthy candidate', async t => {
   const { result, current, snapshot, old } = await transaction(t);
@@ -47,5 +52,12 @@ test('updater preparation failure leaves running release and data untouched', as
 test('updater health failure automatically restores prior release and snapshot', async t => {
   const { result, current, snapshot, old } = await transaction(t, 'health');
   assert.notEqual(result.status, 0, result.stdout + result.stderr); assert.equal(current, old); assert.equal(snapshot, 'previous-snapshot');
+  assert.match(result.stderr, /Previous version is healthy/);
+});
+test('updater health failure removes candidate snapshot when previous release had none', async t => {
+  const { result, current, snapshot, old } = await transaction(t, 'health', false);
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.equal(current, old);
+  assert.equal(snapshot, null);
   assert.match(result.stderr, /Previous version is healthy/);
 });
