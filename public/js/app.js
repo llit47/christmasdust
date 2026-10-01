@@ -50,6 +50,20 @@ function toggleFavorite(server) {
   try { localStorage.setItem('christmasdust.favorites', JSON.stringify([...favoriteIds])); } catch { toast('Favorites are saved for this session only.'); }
   render();
 }
+async function rate(server, value) {
+  try {
+    const response = await fetch('/api/ratings', { method: value === null ? 'DELETE' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(value === null ? { serverId: server.id } : { serverId: server.id, value }),
+      signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error(response.status === 429 ? 'Rating cooldown. Try again in a minute.' : 'Could not save your rating. Try again.');
+    const result = await response.json();
+    for (const row of snapshot.servers) {
+      if (row.id === server.id || row.duplicateEndpoints?.includes(server.id)) row.ratings = result.ratings;
+    }
+    return result.ratings;
+  } catch (error) { toast(error.message); return null; }
+}
 async function copy(command) {
   try { await navigator.clipboard.writeText(command); toast('Connect command copied.'); }
   catch { $('copy-value').value = command; $('copy-dialog').showModal(); $('copy-value').select(); }
@@ -68,7 +82,7 @@ function render() {
   const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position during polling.
-  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy })));
+  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate })));
   if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length && snapshot.servers.every(row => row.stale === true) ? 'No recently verified servers are available yet.' : snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
   renderHidden();
 }

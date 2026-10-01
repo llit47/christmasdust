@@ -12,7 +12,7 @@ export function connection(id) {
   return { url: `steam://connect/${id}`, command: `connect ${id}` };
 }
 export function flag(code) { return /^[A-Z]{2}$/.test(code ?? '') ? [...code].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('') : '◈'; }
-export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy }) {
+export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy, rate }) {
   const e = (tag, text, cls) => element(document, tag, text, cls);
   const card = e('article', undefined, 'server');
   const title = e('div', undefined, 'server-title');
@@ -21,6 +21,30 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   star.addEventListener('click', () => toggleFavorite(server));
   const heading = e('h3', server.name || server.id);
   title.append(star, heading);
+  const ratings = e('div', undefined, 'ratings');
+  ratings.setAttribute('aria-label', 'Anonymous server ratings');
+  const buttons = [1, -1].map(value => {
+    const button = e('button'); button.type = 'button';
+    button.addEventListener('click', async () => {
+      buttons.forEach(node => { node.disabled = true; });
+      try {
+        const updated = await rate(server, server.ratings?.vote === value ? null : value);
+        if (updated) server.ratings = updated;
+        drawRatings();
+      } finally { buttons.forEach(node => { node.disabled = false; }); }
+    });
+    ratings.append(button); return button;
+  });
+  function drawRatings() {
+    buttons.forEach((button, index) => {
+      const value = index === 0 ? 1 : -1;
+      const selected = server.ratings?.vote === value;
+      button.textContent = `${value === 1 ? '👍' : '👎'} ${server.ratings?.[value === 1 ? 'up' : 'down'] ?? 0}`;
+      button.setAttribute('aria-pressed', String(selected));
+      button.setAttribute('aria-label', `${selected ? 'Remove' : 'Vote'} thumbs ${value === 1 ? 'up' : 'down'} for ${server.name || server.id}`);
+    });
+  }
+  drawRatings(); title.append(ratings);
   const sub = e('div', undefined, 'server-meta');
   sub.append(e('span', `${flag(server.countryCode)} ${server.country || server.countryCode || 'Location unknown'}`), e('span', server.map || 'Map unknown'));
   const tags = e('div', undefined, 'tags');

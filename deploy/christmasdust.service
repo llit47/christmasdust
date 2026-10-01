@@ -10,6 +10,7 @@ Type=simple
 User=christmasdust
 Group=christmasdust
 WorkingDirectory=/opt/christmasdust/current
+Environment=RATINGS_PATH=/var/lib/christmasdust/ratings.sqlite
 EnvironmentFile=/etc/christmasdust/christmasdust.env
 ExecStart=/opt/christmasdust/node/bin/node src/index.js
 Restart=on-failure

@@ -583,3 +583,9 @@ dialog input {
     transition:none!important;
   }
 }
+
+.server-title h3 { flex:1; min-width:0; }
+.ratings { display:flex; gap:3px; flex-shrink:0; }
+.ratings button { padding:4px 6px; min-height:28px; border:1px solid var(--line); border-radius:4px; background:transparent; color:var(--muted); font-size:11px; white-space:nowrap; }
+.ratings button[aria-pressed="true"] { color:var(--mint); border-color:var(--mint); background:#25453255; }
+.ratings button:disabled { opacity:.6; }
