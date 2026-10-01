@@ -63,3 +63,9 @@ The admin refresh endpoint is optional. Set a generated high-entropy ADMIN_TOKEN
 ## Release validation still required
 
 Automated tests use injected network adapters and exercise updater success, preparation failure and rollback with temporary paths and OS/network shims; live Web API access requires a real operator key; master UDP discovery does not. Before public launch, verify Steam results and UDP access on the deployment host, install/update/fail-health rollback on a disposable Debian/Ubuntu VM, configure TLS, and inspect desktop/mobile behavior with real server populations. No live-network tests belong in CI.
+
+## Player history storage
+
+Back up `/var/lib/christmasdust/player-stats.sqlite` separately from the snapshot and ratings database, preferably while the service is stopped. `STATS_PATH` selects its location; native upgrades atomically add the persistent default to older env files and preserve explicit overrides, ownership and mode. Application updates and rollback do not copy, replace or delete this database. The service closes it on shutdown. An unavailable store at startup disables history until restart; history read failures return 503, and write failures retry during later live batches without changing monitoring.
+
+Seven days of raw five-minute measurements are retained. Cleanup deletes at most 10000 expired rows once per five minutes of existing live activity, without another timer; a large backlog drains over multiple batches. Dormant installations prune when live activity resumes. There is no stored visitor data or old-server query registry. A new endpoint needs measurements in at least two half-hour buckets before a line can appear; missing half hours break the line. Server-advertised counts are informational, not independently verified occupancy.

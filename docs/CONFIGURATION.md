@@ -16,6 +16,8 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | MAX_SERVERS | 1000 | Automatic candidate capacity, 1–5000; curated includes take priority |
 | STALE_AFTER_MS | 180000 | Last successful live refresh becomes stale after this; at least live interval |
 | RETENTION_MS | 604800000 | Retain non-curated candidates without discovery/live success, or hidden candidates without a positive theme match, for this duration, 1 hour–30 days |
+| STATS_PATH | ./data/player-stats.sqlite | Separate seven-day player history SQLite; native default `/var/lib/christmasdust/player-stats.sqlite`; `:memory:` for tests |
+| RATINGS_PATH | ./data/ratings.sqlite | Separate persistent anonymous ratings SQLite |
 | SNAPSHOT_PATH | ./data/snapshot.json | Atomic persistent snapshot file |
 | DETECTION_PATH | ./config/detection.json | Required classification/include/exclude JSON; native installs require an absolute path |
 | DISCOVERY_MODE | auto | auto uses Web API when keyed plus master UDP; steam requires key and also uses master UDP; seeds disables both sources |
@@ -25,7 +27,7 @@ Copy `.env.example` to `.env` for local use. Native installation uses `/etc/chri
 | TRUST_CF_COUNTRY | false | Accept CF-IPCountry only from a trusted immediate peer; requires trusted proxies |
 | ADMIN_TOKEN | empty | Disables admin API when empty; otherwise at least 32 non-whitespace characters |
 
-No precise visitor coordinates are accepted by any API. The frontend sends only a snapshot GET.
+No precise visitor coordinates are accepted by any API. The frontend reads snapshots and player history separately; neither accepts visitor coordinates.
 
 ## Discovery and detection
 

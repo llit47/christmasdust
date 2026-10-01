@@ -24,7 +24,12 @@ async function main() {
     monitor.start();
   });
   server.requestTimeout = 15000; server.headersTimeout = 10000;
-  const closeStores = () => { ratings.close(); stats?.close(); };
+  let storesClosed = false;
+  const closeStores = () => {
+    if (storesClosed) return;
+    storesClosed = true;
+    try { ratings.close(); } finally { stats?.close(); }
+  };
   server.on('error', () => { console.error('HTTP listen failed'); process.exitCode = 1; monitor.stop(); closeStores(); });
   for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {
     monitor.stop(); server.close(closeStores);

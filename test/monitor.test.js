@@ -589,10 +589,12 @@ test('history records current measured counts only; missing counts and query fai
 });
 
 test('history write and cleanup failures preserve monitoring, snapshot data and visibility', async () => {
+  let writes = 0;
   const normal = fixture().monitor;
-  const broken = fixture({ stats: { record() { throw Error('SQLite unavailable'); }, prune() { throw Error('SQLite unavailable'); } } }).monitor;
+  const broken = fixture({ stats: { record() { writes++; throw Error('SQLite unavailable'); }, prune() { throw Error('SQLite unavailable'); } } }).monitor;
   for (const monitor of [normal, broken]) { await monitor.init(); await monitor.run('discovery'); await monitor.run('live'); }
   assert.deepEqual(broken.snapshot(), normal.snapshot());
+  assert.equal(writes, 1); await broken.run('live'); assert.equal(writes, 2);
 });
 
 test('removed endpoints stop querying and rediscovery continues their persistent history', async t => {
@@ -610,4 +612,18 @@ test('removed endpoints stop querying and rediscovery continues their persistent
   advance(SAMPLE_MS); await monitor.run('live'); assert.equal(calls, 2);
   monitor.rules = rules; await monitor.run('discovery'); await monitor.run('live'); assert.equal(calls, 3);
   assert.deepEqual(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=? ORDER BY bucket_at').all(a.id).map(row => row.players), [6, 9]);
+});
+
+
+test('invalid player counts and unmeasured GameDig player lists never create zero samples', async t => {
+  const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+  const { monitor, advance } = fixture({ stats });
+  await monitor.init(); await monitor.run('discovery');
+  for (const count of [null, undefined, -1, NaN, 1.5, []]) {
+    monitor.query = async () => ({ numplayers: count });
+    advance(SAMPLE_MS); await monitor.run('live');
+  }
+  assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, 0);
+  monitor.query = async () => ({ players: 4 }); await monitor.run('live');
+  assert.equal(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=?').get(a.id).players, 4);
 });

@@ -299,9 +299,32 @@ input[type=checkbox] {
   flex-direction:column;
   gap:3px;
 }
+.population-top {
+  display:flex;
+  align-items:center;
+  flex-wrap:nowrap;
+  gap:4px;
+  height:30px;
+}
+.player-sparkline {
+  display:block;
+  flex:0 0 60px;
+  width:60px;
+  height:24px;
+  color:var(--mint);
+  opacity:.7;
+}
+.player-sparkline path {
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.5;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
 .population strong {
   font-size:20px;
   font-variant-numeric:tabular-nums;
+  white-space:nowrap;
 }
 .population span,.population small {
   font-size:11px;
@@ -470,6 +493,14 @@ dialog input {
   .server {
     grid-template-columns:minmax(0,1fr) 110px 210px;
   }
+  .population-top {
+    gap:0;
+  }
+  .player-sparkline {
+    flex-basis:50px;
+    width:50px;
+    height:22px;
+  }
 }
 @media(max-width:640px) {
   .masthead,main,footer {
@@ -560,6 +591,14 @@ dialog input {
   }
   .server h3 {
     font-size:15px;
+  }
+  .population-top {
+    gap:4px;
+  }
+  .player-sparkline {
+    flex-basis:54px;
+    width:54px;
+    height:22px;
   }
   .population strong {
     font-size:20px;
