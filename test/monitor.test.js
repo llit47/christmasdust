@@ -478,3 +478,36 @@ test('restoring after a reduced capacity preserves includes and stays bounded', 
   const { monitor } = fixture({ config: readConfig({ MAX_SERVERS: '1' }), rules: { ...rules, include: [b] }, store: { load: async () => saved, save: async () => {} } });
   await monitor.init(); assert.equal(monitor.servers.size, 1); assert.equal(monitor.servers.has(b.id), true);
 });
+
+test('persisted probable-map-only servers are removed on restore and stay absent after saving again', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'christmasdust-map-restore-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new SnapshotStore(join(directory, 'snapshot.json'));
+  const generic = { ...a, name: 'Public Server', map: 'cs_alpin', discoverySources: ['map:cs_alpin'] };
+  const qualifying = [
+    { name: 'Winter Server', map: 'cs_alpin', expected: 'probable' },
+    { name: 'Public Server', map: 'cs_alpin', discoveryTags: 'snow', expected: 'probable' },
+    { name: 'Public Server', map: 'cs_alpin', discoveryDescription: 'winter server', expected: 'probable' },
+    { name: 'Xmas Server', map: 'cs_alpin', expected: 'high' },
+    { name: 'Public Server', map: 'de_dust2_xmas', expected: 'high' },
+    { name: 'Public Server', map: 'cs_alpin', curated: true, expected: 'curated' }
+  ].map((row, i) => ({ ...parseAddress(`8.8.4.${i + 1}:27015`), ...row }));
+  const included = parseAddress(qualifying.at(-1).id);
+  const updatedRules = { ...rules, include: [included] };
+  const persisted = [generic, ...qualifying].map(({ expected, ...row }) => ({ ...row, status: 'online',
+    classification: { confidence: 'probable', reasons: ['map: verified winter map (cs_alpin)'] },
+    discoveredAt: 1000000, lastSeenAt: 1000000 }));
+  await store.save({ schema: 1, state: {}, servers: persisted });
+  const { monitor } = fixture({ store, rules: updatedRules, query: async row => ({ name: row.name, map: row.map }) });
+  await monitor.init();
+  assert.equal(monitor.servers.has(generic.id), false);
+  const expected = qualifying.map(row => [row.id, row.expected]);
+  assert.deepEqual(monitor.snapshot().servers.map(row => [row.id, row.classification.confidence]), expected);
+  await monitor.run('live'); // Save the reclassified monitor state through the real persistence adapter.
+  const saved = await store.load();
+  assert.equal(saved.servers.some(row => row.id === generic.id), false);
+  assert.deepEqual(saved.servers.map(row => [row.id, row.classification.confidence]), expected);
+  const restored = fixture({ store, rules: updatedRules }).monitor;
+  await restored.init();
+  assert.deepEqual(restored.snapshot().servers.map(row => [row.id, row.classification.confidence]), expected);
+});

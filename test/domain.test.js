@@ -46,16 +46,16 @@ test('explicit names and vetted maps provide strong Christmas evidence', () => {
   assert.equal(classify({ map: 'de_dust2_2x2_xmas' }, rules).confidence, 'high');
   assert.equal(classify({ name: 'Public', map: 'custom_xmas_2026' }, rules).confidence, 'high');
 });
-test('vetted probable maps qualify alone and generic seasonal maps do not', () => {
+test('vetted probable maps need independent seasonal identity and generic seasonal maps do not', () => {
   const probable = classify({ name: 'Winter Holiday Server', map: 'deathrun_jinglebells' }, rules);
   assert.equal(probable.confidence, 'probable');
   assert.ok(probable.signals.some(signal => signal.kind === 'known-probable-map'));
   for (const map of rules.maps.probable) {
-    assert.equal(classify({ map }, rules).confidence, 'probable', map);
-    assert.equal(classify({ name: 'Public', map }, rules).confidence, 'probable', map);
+    assert.equal(classify({ map }, rules).confidence, 'none', map);
+    assert.equal(classify({ name: 'Public', map }, rules).confidence, 'none', map);
   }
-  assert.equal(classify({ name: 'Not Winter', map: 'deathrun_jinglebells' }, rules).confidence, 'probable');
-  assert.equal(classify({ name: 'No Santa', map: 'deathrun_jinglebells' }, rules).confidence, 'probable');
+  assert.equal(classify({ name: 'Not Winter', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
+  assert.equal(classify({ name: 'No Santa', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
   for (const map of ['fy_snow', 'fy_iceworld', 'fy_iceworld2k', 'cs_office', 'de_survivor']) {
     assert.equal(rules.maps.strong.has(map) || rules.maps.probable.has(map), false, map);
     assert.equal(classify({ map }, rules).confidence, 'none', map);
@@ -151,4 +151,23 @@ test('external strings are assigned as text and cannot become links', () => {
   assert.equal(element(document, 'h3', hostile).textContent, hostile);
   assert.equal(connection('8.8.8.8:27015').command, 'connect 8.8.8.8:27015');
   assert.throws(() => connection('javascript:alert(1)')); assert.throws(() => connection('8.8.8.8:0'));
+});
+
+test('probable maps require positive non-map evidence; explicit identity and curation keep precedence', () => {
+  assert.equal(classify({ name: 'Public Server', map: 'cs_alpin' }, rules).confidence, 'none');
+  for (const map of rules.maps.probable) {
+    // Targeted discovery and the catalog's own seasonal map tokens are not independent identity.
+    assert.equal(classify({ name: 'Public Server', map, discoverySources: ['name:winter', `map:${map}`] }, rules).confidence, 'none', map);
+    for (const field of ['name', 'tags', 'description']) {
+      for (const term of ['winter', 'snow', 'santa']) {
+        assert.equal(classify({ name: 'Public Server', map, [field]: `${term} server` }, rules).confidence, 'probable', `${map}: ${field}: ${term}`);
+        assert.equal(classify({ name: 'Public Server', map, [field]: `No ${term}` }, rules).confidence, 'none', `${map}: negated ${field}: ${term}`);
+      }
+      for (const term of ['Christmas', 'Xmas'])
+        assert.equal(classify({ name: 'Public Server', map, [field]: `${term} server` }, rules).confidence, 'high', `${map}: ${field}: ${term}`);
+    }
+    assert.equal(classify({ name: 'Public Server', map }, rules, true).confidence, 'curated', map);
+  }
+  for (const map of rules.maps.strong)
+    assert.equal(classify({ map }, rules).confidence, 'high', map);
 });

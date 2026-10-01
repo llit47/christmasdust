@@ -58,10 +58,11 @@ export function classify(server, rules, curated = false) {
 
   const score = signals.reduce((total, signal) => total + signal.points, 0);
   const independentFields = new Set(signals.filter(signal => signal.points > 1 && signal.field !== 'discovery').map(signal => signal.field));
+  const seasonalIdentity = signals.some(signal => signal.points > 0 && identityFields.includes(signal.field));
   let confidence = 'none';
   if (curated) confidence = 'curated';
   else if (strongMap || (explicit && score >= HIGH_SCORE)) confidence = 'high';
-  else if (probableMap || (score >= PROBABLE_SCORE && relatedIdentity && independentFields.size >= 2)) confidence = 'probable';
+  else if ((probableMap && seasonalIdentity) || (score >= PROBABLE_SCORE && relatedIdentity && independentFields.size >= 2)) confidence = 'probable';
   return { confidence, score, signals, reasons: [ ...(curated ? ['Operator included'] : []),
     ...signals.filter(signal => signal.points > 1).map(signal => signal.reason) ] };
 }
