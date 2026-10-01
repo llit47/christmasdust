@@ -1,6 +1,7 @@
 import { classify } from '../domain/classify.js';
 import { metadata, liveMetadata, cleanText } from '../domain/server.js';
 import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
+import { liveManifestFingerprint, establishManifests, filterMirroredManifests } from '../domain/manifests.js';
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
 export class Monitor {
@@ -92,7 +93,8 @@ export class Monitor {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...liveMetadata(raw), a2sFingerprint: a2sFingerprint(raw), ...this.geoip(row.ip),
+          return { ...row, ...liveMetadata(raw), a2sFingerprint: a2sFingerprint(raw),
+            liveManifestFingerprint: liveManifestFingerprint(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags,
               description: typeof raw.description === 'string' ? raw.description : row.discoveryDescription,
               discoverySources: row.discoverySources }, row, row.curated),
@@ -110,6 +112,8 @@ export class Monitor {
             this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
           }
         });
+        establishManifests([...this.servers.values()], new Set(results.flatMap((result, i) =>
+          result.status === 'fulfilled' ? [rows[i].id] : [])), this.now(), this.config.staleAfter);
         this.state.livePartial = successes !== rows.length;
         if (successes || rows.length === 0) this.state.lastLiveAt = this.now();
       }
@@ -125,10 +129,10 @@ export class Monitor {
   snapshot() {
     const age = this.state.lastLiveAt === null ? null : Math.max(0, this.now() - this.state.lastLiveAt);
     // CS 1.6 supports 32 clients. Keep oversized records monitored so they can recover.
-    const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none' && !(s.maxPlayers > 32)).map(({ curated, discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
+    const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none' && !(s.maxPlayers > 32)).map(({ discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' }));
-    return { servers: groupDuplicates(rows),
+    return { servers: groupDuplicates(filterMirroredManifests(rows)),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }
