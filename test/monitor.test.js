@@ -82,6 +82,53 @@ test('explicit GameDig zero counts and false password replace prior values', asy
     password: false, backendQueryMs: 0, bots: 0 });
   assert.equal(row.themeMisses, 0);
 });
+test('public capacity sanity allows 32 and unknown slots while hiding oversized servers from totals', async () => {
+  const capacities = [32, 33, 64, 200, 255, 0, undefined];
+  const servers = capacities.map((maxPlayers, index) => ({
+    ...parseAddress(`8.8.8.8:${27015 + index}`), name: `Christmas ${index}`, map: 'de_xmas', players: 5,
+    ...(maxPlayers === undefined ? {} : { maxPlayers })
+  }));
+  const { monitor } = fixture({
+    rules: { ...rules, include: [servers[1]] },
+    discover: async () => ({ servers, successfulRequests: 1, partial: false }),
+    query: async row => servers.find(server => server.id === row.id)
+  });
+  await monitor.init(); await monitor.run('discovery');
+  const assertPublic = () => {
+    const rows = monitor.snapshot().servers;
+    assert.deepEqual(rows.map(row => row.id).sort(), [servers[0], servers[5], servers[6]].map(row => row.id).sort());
+    assert.equal(rows.length, 3);
+    assert.equal(rows.reduce((sum, row) => sum + row.players, 0), 15);
+    assert.equal(monitor.servers.size, capacities.length);
+  };
+  assertPublic();
+  await monitor.run('live'); assertPublic();
+});
+test('oversized capacity stays hidden across incomplete or failed queries and recovers at 32 slots', async () => {
+  let live = { name: 'Christmas Server', map: 'de_xmas', numplayers: 12, maxplayers: 64 };
+  let saved;
+  const { monitor } = fixture({
+    discover: async () => ({ servers: [a], successfulRequests: 1, partial: false }),
+    query: async () => live,
+    store: { load: async () => null, save: async snapshot => { saved = snapshot; } }
+  });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(monitor.snapshot().servers.length, 0);
+  assert.equal(saved.servers[0].maxPlayers, 64);
+  live = { name: 'Christmas Server', map: 'de_xmas' };
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(a.id).maxPlayers, 64);
+  assert.equal(monitor.snapshot().servers.length, 0);
+  const query = monitor.query;
+  monitor.query = async () => { throw Error('UDP timeout'); };
+  await monitor.run('live');
+  assert.equal(monitor.snapshot().servers.length, 0);
+  monitor.query = query; live = { ...live, numplayers: 12, maxplayers: 32 };
+  await monitor.run('live');
+  const rows = monitor.snapshot().servers;
+  assert.equal(rows.length, 1); assert.equal(rows[0].id, a.id);
+  assert.equal(rows[0].maxPlayers, 32); assert.equal(rows[0].players, 12);
+});
 test('one live failure does not abort successful queries', async () => {
   const { monitor } = fixture({ query: async row => { if (row.id === b.id) throw Error(); return { name: 'snow', numplayers: 3 }; } });
   await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
