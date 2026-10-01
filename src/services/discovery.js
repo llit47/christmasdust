@@ -25,7 +25,7 @@ export function steamDiscovery(config, rules, fetcher = fetch) {
       ...maps.map(map => ({ filter: `\\appid\\10\\gamedir\\cstrike\\map\\${map}`, source: `map:${map}` })),
       ...targetedTerms(rules, 5).map(term => ({ filter: `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`, source: `name:${term}` }))
     ];
-    const results = await mapLimit(requests, 2, async ({ filter, source }) => {
+    const results = await mapLimit(requests, 4, async ({ filter, source }) => {
       const url = new URL('https://api.steampowered.com/IGameServersService/GetServerList/v1/');
       url.search = new URLSearchParams({ key: config.steamKey, filter, limit: String(config.discoveryLimit) });
       const response = await fetcher(url, { signal: AbortSignal.timeout(config.discoveryTimeout), redirect: 'error' });

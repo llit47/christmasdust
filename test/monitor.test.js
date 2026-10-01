@@ -287,10 +287,38 @@ test('broad and targeted discovery merge safely despite a targeted failure', asy
   assert.equal(result.servers.find(row => row.id === a.id).tags, 'xmas,secure');
   assert.equal(result.servers.find(row => row.id === niche.id).maxPlayers, 32);
   assert.equal(result.partial, true); assert.equal(result.successfulRequests, 9);
-  assert.equal(filters.length, 10); assert.equal(peak, 2);
+  assert.equal(filters.length, 10); assert.equal(peak, 4);
   assert.ok(filters.every(filter => filter.startsWith('\\appid\\10\\gamedir\\cstrike\\')));
   assert.deepEqual(filters.filter(filter => filter.includes('name_match')).sort(),
     ['\\appid\\10\\gamedir\\cstrike\\name_match\\*xmas*', '\\appid\\10\\gamedir\\cstrike\\name_match\\*santa*'].sort());
+});
+test('default discovery fits below the stale threshold with four concurrent requests', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const filters = []; const pending = []; const batches = [];
+  const discover = steamDiscovery(config, rules, url => {
+    filters.push(url.searchParams.get('filter'));
+    return new Promise((resolve, reject) => pending.push(reject));
+  });
+  const resultPromise = discover();
+  // Release one full timeout wave at a time without waiting 15 real seconds.
+  let completed = 0;
+  while (completed < 33) {
+    await new Promise(resolve => setImmediate(resolve));
+    const batch = pending.splice(0);
+    assert.ok(batch.length > 0 && batch.length <= 4);
+    batches.push(batch.length); completed += batch.length;
+    batch.forEach(reject => reject(new Error('simulated request timeout')));
+  }
+  const result = await resultPromise;
+  assert.deepEqual(batches, [4, 4, 4, 4, 4, 4, 4, 4, 1]);
+  assert.equal(filters.length, 33);
+  assert.equal(filters.filter(filter => filter.includes('\\map\\')).length, 20);
+  assert.equal(filters.filter(filter => filter.includes('\\name_match\\')).length, 5);
+  assert.equal(config.discoveryTimeout, 15000);
+  assert.equal(batches.length * config.discoveryTimeout, 135000);
+  assert.equal(config.staleAfter, 180000);
+  assert.ok(batches.length * config.discoveryTimeout < config.staleAfter);
+  assert.equal(result.partial, true); assert.equal(result.successfulRequests, 0);
 });
 test('exact Christmas map search finds a generic hostname and merges duplicate sources', async () => {
   const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
