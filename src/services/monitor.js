@@ -84,7 +84,7 @@ export class Monitor {
     for (const [id, row] of this.servers) {
       const lastThemeMatch = row.lastThemeMatchAt ?? Math.max(row.lastSeenAt || 0, row.discoveredAt || 0);
       if (this.rules.exclude.has(id) || (!included.has(id) && (this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention ||
-        this.now() - lastThemeMatch > this.config.retention))) this.servers.delete(id);
+        (row.classification.confidence === 'none' && this.now() - lastThemeMatch > this.config.retention)))) this.servers.delete(id);
       else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify({ ...row, tags: row.discoveryTags,
         description: row.discoveryDescription, discoverySources: row.discoverySources }, this.rules); }
     }

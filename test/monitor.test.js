@@ -512,7 +512,7 @@ test('persisted probable-map-only servers are removed on restore and stay absent
   assert.deepEqual(restored.snapshot().servers.map(row => [row.id, row.classification.confidence]), expected);
 });
 
-test('cached strong maps preserve visibility but incomplete observations cannot renew theme retention', async () => {
+test('cached strong maps preserve visibility without renewing theme-observation state', async () => {
   for (const map of ['de_dust2_xmas', 'custom_christmas_arena']) {
     const server = { ...a, name: 'Public Server', map };
     const { monitor, advance } = fixture({
@@ -537,7 +537,34 @@ test('cached strong maps preserve visibility but incomplete observations cannot 
     advance(Math.floor(monitor.config.retention / 2) - 1); await monitor.run('live');
     assert.equal(monitor.servers.get(a.id).lastThemeMatchAt, lastMatch);
     advance(2); monitor.prune();
-    assert.equal(monitor.servers.has(a.id), false); // Recent liveness alone cannot extend seasonal retention.
+    assert.equal(monitor.servers.has(a.id), true); // Active high confidence does not expire on theme age alone.
+    assert.equal(monitor.servers.get(a.id).lastThemeMatchAt, lastMatch);
+    assert.equal(monitor.snapshot().servers[0].map, map);
+    monitor.query = async () => ({ name: 'Public Server', map: 'de_dust2' });
+    await monitor.run('live');
+    const ordinary = monitor.servers.get(a.id);
+    assert.equal(ordinary.classification.confidence, 'none');
+    assert.ok(!ordinary.classification.signals.some(signal => signal.field === 'map' && signal.points > 0));
     assert.equal(monitor.snapshot().servers.length, 0);
+    monitor.prune();
+    assert.equal(monitor.servers.has(a.id), false); // Theme retention expiry applies once classification is none.
   }
+});
+
+test('old theme timestamps expire only none-confidence candidates while active high/probable servers stay', () => {
+  const { monitor, advance } = fixture();
+  monitor.add({ ...a, map: 'de_dust2' });
+  monitor.add({ ...b, name: 'Winter Community', map: 'cs_alpin' });
+  const pending = parseAddress('9.9.9.9:27015');
+  monitor.add({ ...pending, name: 'Public Server', map: 'de_dust2', candidateOnly: true });
+  const lastMatch = monitor.now();
+  advance(monitor.config.retention + 1);
+  for (const row of monitor.servers.values()) {
+    row.lastSeenAt = monitor.now(); row.status = 'online'; row.lastThemeMatchAt = lastMatch;
+  }
+  monitor.prune();
+  assert.equal(monitor.servers.get(a.id).classification.confidence, 'high');
+  assert.equal(monitor.servers.get(b.id).classification.confidence, 'probable');
+  assert.equal(monitor.servers.has(pending.id), false);
+  assert.equal(monitor.snapshot().servers.length, 2);
 });
