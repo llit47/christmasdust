@@ -95,7 +95,7 @@ export class Monitor {
       if (kind === 'discovery') {
         const result = await this.discover();
         this.state.discoveryDisabled = result.disabled;
-        this.state.discoveryPartial = result.partial || (!result.disabled && !result.successfulRequests);
+        this.state.discoveryPartial = result.partial || (!result.disabled && !result.successfulRequests && !result.samplingSkipped);
         if (result.successfulRequests) this.state.lastDiscoveryAt = this.now();
         for (const row of result.servers) this.add(row, this.rules.include.some(s => s.id === row.id));
       } else {

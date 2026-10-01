@@ -7,10 +7,11 @@ export function combinedDiscovery(config, rules, {
 } = {}) {
   return async () => {
     const results = await Promise.allSettled([Promise.resolve().then(web), Promise.resolve().then(master)]);
-    const servers = new Map(); let successfulRequests = 0; let partial = false; let disabled = true;
+    const servers = new Map(); let successfulRequests = 0; let partial = false; let disabled = true; let samplingSkipped = false;
     for (const [index, result] of results.entries()) {
       if (result.status === 'rejected') { partial = true; disabled = false; continue; }
       const source = result.value;
+      samplingSkipped ||= source.samplingSkipped === true;
       partial ||= source.partial; disabled &&= source.disabled; successfulRequests += source.successfulRequests;
       for (const raw of source.servers) {
         let address;
@@ -23,6 +24,6 @@ export function combinedDiscovery(config, rules, {
             index === 0 ? 'web-api' : 'master-udp'])] });
       }
     }
-    return { servers: [...servers.values()], partial, successfulRequests, disabled };
+    return { servers: [...servers.values()], partial, successfulRequests, disabled, samplingSkipped };
   };
 }

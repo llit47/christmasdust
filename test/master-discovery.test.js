@@ -14,7 +14,7 @@ const masterIp = '8.8.4.4';
 const first = parseAddress('8.8.8.8:27015');
 const second = parseAddress('1.1.1.1:27015');
 const filter = '\\appid\\10\\gamedir\\cstrike';
-const result = (servers, overrides = {}) => ({ servers, successfulRequests: 1, partial: false, disabled: false, ...overrides });
+const result = (servers, overrides = {}) => ({ servers, successfulRequests: 1, partial: false, disabled: false, attempted: true, ...overrides });
 const resolve = async (host, options) => {
   assert.equal(host, 'hl2master.steampowered.com'); assert.deepEqual(options, { family: 4 });
   return { address: masterIp };
@@ -84,23 +84,116 @@ test('master pacing cancels queued sends and never catches up with a burst after
   clock.advance(1); assert.deepEqual(sends, [0, 60000, 66000]);
 });
 
-test('production master pacing is global across sockets and instances, with expired pages cancelled', async () => {
-  const firstSocket = socket(current => reply(current, packet([first.id], false)));
-  const found = await queryMaster(options, () => firstSocket);
-  assert.deepEqual(found.servers, [first]); assert.equal(found.partial, true);
-  assert.equal(firstSocket.sent.length, 1); assert.equal(firstSocket.closed, 1);
-  const secondSocket = socket(() => assert.fail('pacing must prevent another immediate send'));
-  const blocked = await queryMaster(options, () => secondSocket);
-  assert.equal(blocked.partial, true); assert.equal(secondSocket.sent.length, 0);
-  const instances = [];
-  const discover = masterDiscovery({ ...config, discoveryTimeout: 10 }, { maps: {} }, {
-    resolve, query: input => {
-      const instance = socket(() => assert.fail('a new discovery instance must share the pacer'));
-      instances.push(instance); return queryMaster(input, () => instance);
-    }
+const flush = async () => { for (let index = 0; index < 20; index++) await Promise.resolve(); };
+
+function pacedDiscovery({ paginate = false, fail = false } = {}) {
+  const clock = pacingClock(); const pace = createMasterSendPacer(clock); const sends = []; const sockets = [];
+  const discover = masterDiscovery(config, rules, { ...clock, resolve, query: input => {
+    const instance = socket(current => {
+      sends.push({ at: clock.now(), filter: input.filter, region: input.region });
+      if (fail === 'timeout') return;
+      if (fail === 'error') return current.emit('error', Error('UDP failed'));
+      reply(current, packet([first.id], !paginate || current.sent.length === 2));
+    });
+    sockets.push(instance);
+    return queryMaster(input, () => instance, pace, clock);
+  } });
+  const run = async () => {
+    const pending = discover(); await flush();
+    for (let step = 0; step < 16; step++) { clock.advance(1500); await flush(); }
+    return pending;
+  };
+  return { clock, pace, sends, sockets, run };
+}
+
+test('queued master requests have no reply timeout until they physically send', async () => {
+  const clock = pacingClock(); const pace = createMasterSendPacer(clock);
+  pace(() => {});
+  const instance = socket(current => reply(current, packet([first.id])));
+  let settled = false;
+  const pending = queryMaster({ ...options, deadline: 22500 }, () => instance, pace, clock)
+    .then(value => { settled = true; return value; });
+  clock.advance(5999); await flush();
+  assert.equal(settled, false); assert.equal(instance.sent.length, 0); assert.equal(instance.closed, 0);
+  clock.advance(1); await flush();
+  const found = await pending;
+  assert.equal(found.partial, false); assert.equal(found.attempted, true); assert.equal(instance.sent.length, 1);
+  assert.equal(clock.pending(), 0);
+});
+
+test('healthy bounded master sampling stays non-partial and rotates only actually sent filters', async () => {
+  const fixture = pacedDiscovery();
+  // Another discovery instance has just used the process-wide send slot.
+  fixture.pace(() => {});
+  const firstRun = await fixture.run();
+  assert.equal(firstRun.partial, false); assert.equal(firstRun.successfulRequests, 3);
+  assert.deepEqual(fixture.sends.map(send => send.at), [6000, 12000, 18000]);
+  assert.equal(fixture.sockets.length, 4); assert.equal(fixture.clock.pending(), 0);
+  const catalog = [...rules.maps.strong, ...rules.maps.probable];
+  const secondRun = await fixture.run();
+  assert.equal(secondRun.partial, false); assert.equal(secondRun.successfulRequests, 4);
+  assert.equal(fixture.sends[3].filter, `${filter}\\map\\${catalog[3]}`);
+  assert.ok(fixture.sends.slice(3).every(send => send.at <= 24000 + 22500));
+  fixture.clock.advance(60000); await flush();
+  assert.equal(fixture.sends.length, 7); assert.equal(fixture.clock.pending(), 0);
+});
+
+test('pagination shares the paced run budget and unsent pages do not mark discovery partial', async () => {
+  const fixture = pacedDiscovery({ paginate: true });
+  const found = await fixture.run();
+  assert.equal(found.partial, false); assert.equal(found.successfulRequests, 4);
+  assert.deepEqual(fixture.sends.map(send => send.at), [0, 6000, 12000, 18000]);
+  assert.equal(new Set(fixture.sends.map(send => send.filter)).size, 2);
+  assert.equal(fixture.sockets.length, 4);
+  assert.equal(fixture.clock.pending(), 0);
+  const next = await fixture.run(); assert.equal(next.partial, false);
+  assert.equal(fixture.sends[4].filter, `${filter}\\map\\${[...rules.maps.strong][2]}`);
+});
+
+test('a delayed pacer never sends after the master run budget', async () => {
+  const clock = pacingClock(); const pace = createMasterSendPacer(clock);
+  pace(() => {});
+  const instance = socket(() => assert.fail('expired send must be skipped'));
+  const pending = queryMaster({ ...options, deadline: 22500 }, () => instance, pace, clock);
+  clock.stall(22501); await flush();
+  const found = await pending;
+  assert.equal(found.partial, false); assert.equal(found.attempted, false);
+  assert.equal(instance.sent.length, 0); assert.equal(instance.closed, 1); assert.equal(clock.pending(), 0);
+});
+
+test('normal sampling, including an entirely skipped budget, does not degrade the public snapshot', async () => {
+  const clock = pacingClock(); const pace = createMasterSendPacer(clock);
+  pace(() => {});
+  let instances = 0;
+  const master = masterDiscovery(config, rules, { ...clock, resolve, query: input => {
+    instances++;
+    return queryMaster(input, () => socket(current => reply(current, packet([]))), pace, clock);
+  } });
+  const discover = combinedDiscovery(config, rules, {
+    master, web: async () => result([], { disabled: true, successfulRequests: 0 })
   });
-  const empty = await discover(); assert.equal(empty.partial, true);
-  assert.equal(instances.length, 8); assert.ok(instances.every(instance => instance.sent.length === 0 && instance.closed === 1));
+  const monitor = new Monitor({ config, rules, discover, now: clock.now, log: { warn() {} },
+    store: { load: async () => null, save: async () => {} } });
+  await monitor.init();
+  const pending = monitor.run('discovery'); await flush();
+  clock.stall(22501); await flush(); await pending;
+  assert.equal(instances, 2); assert.equal(clock.pending(), 0);
+  assert.equal(monitor.snapshot().meta.discoveryPartial, false);
+  assert.equal(monitor.snapshot().meta.degraded, false);
+  const healthy = monitor.run('discovery'); await flush();
+  for (let step = 0; step < 16; step++) { clock.advance(1500); await flush(); }
+  await healthy;
+  assert.equal(monitor.snapshot().meta.discoveryPartial, false);
+  assert.equal(monitor.snapshot().meta.degraded, false);
+});
+
+test('actual master sends that time out or error still mark the run partial', async () => {
+  for (const fail of ['timeout', 'error']) {
+    const fixture = pacedDiscovery({ fail }); const found = await fixture.run();
+    assert.equal(found.partial, true); assert.equal(found.successfulRequests, 0);
+    assert.deepEqual(fixture.sends.map(send => send.at), [0, 6000, 12000, 18000]);
+    assert.equal(fixture.clock.pending(), 0);
+  }
 });
 
 test('master parser validates framing, public IPv4 endpoints and network-order ports', () => {
@@ -127,7 +220,7 @@ test('master query uses fixed destination, exact wire filters and the same socke
     }
   });
   const found = await queryMaster(options, () => instance, unpaced);
-  assert.deepEqual(found, { servers: [first, second], partial: false, successfulRequests: 2 });
+  assert.deepEqual(found, { servers: [first, second], partial: false, successfulRequests: 2, attempted: true });
   assert.equal(instance.sent.length, 2); assert.equal(instance.closed, 1);
   assert.throws(() => queryMaster({ ...options, filter: `${filter}\\map\\*` }));
   assert.throws(() => queryMaster({ ...options, ip: '127.0.0.1' }));
@@ -150,37 +243,22 @@ test('master timeout retains prior pages and bounds pagination, endpoint counts 
   assert.equal(failedSocket.closed, 1);
 });
 
-test('master discovery rotates the full catalog, covers regions and bounds requests/concurrency', async () => {
-  let requests = []; let active = 0; let peak = 0;
+test('master discovery rotates the full catalog and regions with at most four filters and concurrency two', async () => {
+  const requests = []; let active = 0; let peak = 0;
   const discover = masterDiscovery(config, rules, { resolve, query: async input => {
     requests.push(input); active++; peak = Math.max(peak, active);
     await new Promise(done => setImmediate(done)); active--;
     return result([]);
   } });
   const catalog = [...rules.maps.strong, ...rules.maps.probable];
-  for (let run = 0; run < Math.ceil(catalog.length / 20); run++) {
-    requests = []; await discover();
-    assert.equal(requests.length, 28);
-    assert.deepEqual(requests.filter(request => request.region !== 255).map(request => request.region).sort(), [0, 1, 2, 3, 4, 5, 6, 7]);
-    assert.deepEqual(new Set(requests.filter(request => request.region === 255).map(request => request.filter.split('\\map\\')[1])),
-      new Set(Array.from({ length: 20 }, (_, index) => catalog[(run * 20 + index) % catalog.length])));
-    assert.equal(requests[0].filter, `${filter}\\map\\${catalog[(run * 20 + run) % catalog.length]}`);
-    assert.ok(requests.every(request => request.timeoutMs === 1500 && request.limit === 128));
+  for (let run = 0; run < Math.ceil((catalog.length + 8) / 4); run++) {
+    const before = requests.length; const found = await discover();
+    assert.equal(found.partial, false); assert.equal(requests.length - before, 4);
   }
+  assert.deepEqual(requests.slice(0, catalog.length).map(request => request.filter.split('\\map\\')[1]), catalog);
+  assert.deepEqual(requests.slice(catalog.length, catalog.length + 8).map(request => request.region), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.ok(requests.every(request => request.timeoutMs === 1500 && request.limit === 128));
   assert.equal(peak, 2);
-  assert.equal(Math.ceil(28 / peak) * 1500 + 1500, 22500);
-});
-
-test('master rotates its first filter so pacing cannot permanently starve regional searches', async () => {
-  let firstRequest; const firstRegions = new Set();
-  const discover = masterDiscovery(config, rules, { resolve, query: async input => {
-    firstRequest ??= input; return result([]);
-  } });
-  for (let run = 0; run < 28; run++) {
-    firstRequest = null; await discover();
-    if (firstRequest.region !== 255) firstRegions.add(firstRequest.region);
-  }
-  assert.deepEqual(firstRegions, new Set([0, 1, 2, 3, 4, 5, 6, 7]));
 });
 
 test('master adapter caps total endpoints, strips metadata, preserves provenance and bounds DNS failure', async () => {
@@ -191,7 +269,7 @@ test('master adapter caps total endpoints, strips metadata, preserves provenance
   assert.equal(found.servers.length, 1); assert.equal(found.partial, true);
   assert.equal(found.servers[0].candidateOnly, true); assert.equal(found.servers[0].name, undefined);
   assert.equal(found.servers[0].map, undefined);
-  assert.ok(found.servers[0].discoverySources.includes('master:regional'));
+  assert.equal(found.servers[0].discoverySources.length, 4);
   assert.ok(found.servers[0].discoverySources.includes('master:map:de_christmas'));
   for (const resolve of [async () => { throw Error('DNS failed'); }, () => new Promise(() => {})]) {
     const failed = await masterDiscovery({ ...config, discoveryTimeout: 10 }, rules, {
