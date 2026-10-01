@@ -34,7 +34,12 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now,
     }
     const snapshot = monitor.snapshot();
     const currentVoter = voterHash(req);
-    const servers = ratings ? snapshot.servers.map(server => ({ ...server, ratings: ratings.totals(groupEndpointIds(server), currentVoter) })) : snapshot.servers;
+    const servers = ratings ? snapshot.servers.map(server => {
+      let totals = { up: 0, down: 0, vote: null };
+      try { totals = ratings.totals(groupEndpointIds(server), currentVoter); }
+      catch { /* Informational ratings must not make a valid monitor snapshot unavailable. */ }
+      return { ...server, ratings: totals };
+    }) : snapshot.servers;
     res.json({ ...snapshot, servers, meta: { ...snapshot.meta, serverGeoipConfigured: Boolean(config.geoipPath) }, visitor: { countryCode }, version });
   });
   let lastAdmin = -Infinity;

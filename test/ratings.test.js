@@ -173,3 +173,23 @@ test('body limit also applies to chunked JSON and other API bodies remain reject
   assert.equal((await get('/api/ratings', { method: 'POST', body: '{}' })).status, 413);
   assert.equal(ratings.db.prepare('SELECT count(*) AS n FROM ratings').get().n, 0);
 });
+
+test('server list isolates ratings read failures and preserves the valid monitor snapshot', async t => {
+  const { get, monitor, ratings, vote } = await fixture(t);
+  const snapshot = { servers: [{ id: a, name: 'Winter', status: 'online', duplicateEndpoints: [b] },
+    { id: '9.9.9.9:27015', name: 'Other' }], meta: { lastLiveAt: 123, stale: false } };
+  monitor.snapshot = () => snapshot;
+  const original = structuredClone(snapshot);
+  ratings.totals = ids => {
+    if (ids.includes(a)) throw new Error('SQLite read failure');
+    return { up: 2, down: 1, vote: null };
+  };
+  const response = await get('/api/servers');
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: { up: 0, down: 0, vote: null } });
+  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 2, down: 1, vote: null } });
+  assert.deepEqual(body.meta, { ...snapshot.meta, serverGeoipConfigured: false });
+  assert.deepEqual(snapshot, original);
+  assert.equal((await vote({ serverId: a, value: 1 })).status, 500);
+});
