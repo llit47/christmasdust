@@ -43,15 +43,23 @@ test('explicit names and vetted maps provide strong Christmas evidence', () => {
   assert.equal(map.confidence, 'high');
   assert.equal(map.score, 12);
   assert.ok(map.signals.some(signal => signal.kind === 'known-strong-map'));
+  assert.equal(classify({ map: 'de_dust2_2x2_xmas' }, rules).confidence, 'high');
   assert.equal(classify({ name: 'Public', map: 'custom_xmas_2026' }, rules).confidence, 'high');
 });
-test('probable map needs corroboration and generic snow cannot qualify alone', () => {
+test('vetted probable maps qualify alone and generic seasonal maps do not', () => {
   const probable = classify({ name: 'Winter Holiday Server', map: 'deathrun_jinglebells' }, rules);
   assert.equal(probable.confidence, 'probable');
   assert.ok(probable.signals.some(signal => signal.kind === 'known-probable-map'));
-  assert.equal(classify({ name: 'Public', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
-  assert.equal(classify({ name: 'Not Winter', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
-  assert.equal(classify({ name: 'No Santa', map: 'deathrun_jinglebells' }, rules).confidence, 'none');
+  for (const map of rules.maps.probable) {
+    assert.equal(classify({ map }, rules).confidence, 'probable', map);
+    assert.equal(classify({ name: 'Public', map }, rules).confidence, 'probable', map);
+  }
+  assert.equal(classify({ name: 'Not Winter', map: 'deathrun_jinglebells' }, rules).confidence, 'probable');
+  assert.equal(classify({ name: 'No Santa', map: 'deathrun_jinglebells' }, rules).confidence, 'probable');
+  for (const map of ['fy_snow', 'fy_iceworld', 'fy_iceworld2k', 'cs_office', 'de_survivor']) {
+    assert.equal(rules.maps.strong.has(map) || rules.maps.probable.has(map), false, map);
+    assert.equal(classify({ map }, rules).confidence, 'none', map);
+  }
   assert.equal(classify({ name: 'Public Deathmatch', map: 'fy_snow' }, rules).confidence, 'none');
   assert.equal(classify({ name: 'Snow Arena 24/7', map: 'de_dust2' }, rules).confidence, 'none');
   assert.equal(classify({ name: 'No Christmas', map: 'fy_snow' }, rules).confidence, 'none');
