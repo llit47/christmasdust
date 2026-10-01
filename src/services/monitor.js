@@ -1,3 +1,4 @@
+import { filterSameNameMirrors } from '../domain/name-mirrors.js';
 import { classify } from '../domain/classify.js';
 import { metadata, liveMetadata, cleanText } from '../domain/server.js';
 import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
@@ -32,8 +33,16 @@ export class Monitor {
     this.ready = true;
   }
   themeObservation(raw, previous, curated) {
-    const classification = classify(raw, this.rules, curated);
-    if (classification.confidence !== 'none') return { classification, themeMisses: 0, lastThemeMatchAt: this.now(), retire: false };
+    // An omitted map retains both the last-good metadata and its strong map evidence.
+    const retainStrongMap = !cleanText(raw.map).trim() && previous?.classification?.signals?.some(signal =>
+      signal.field === 'map' && signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind));
+    const classification = classify({ ...raw, map: retainStrongMap ? previous.map : raw.map }, this.rules, curated);
+    if (classification.confidence !== 'none') {
+      const observedTheme = curated || !retainStrongMap || classification.signals.some(signal =>
+        ['name', 'tags', 'description'].includes(signal.field) && signal.points > 0);
+      return { classification, themeMisses: observedTheme ? 0 : previous.themeMisses || 0,
+        lastThemeMatchAt: observedTheme ? this.now() : previous.lastThemeMatchAt, retire: false };
+    }
     if (!previous) return { retire: true };
     // Empty/incomplete responses and query failures are not evidence of a theme change.
     if (!cleanText(raw.name).trim() || !cleanText(raw.map).trim()) {
@@ -146,7 +155,7 @@ export class Monitor {
     const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none' && !(s.maxPlayers > 32)).map(({ discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' }));
-    return { servers: groupDuplicates(filterMirroredManifests(rows)),
+    return { servers: groupDuplicates(filterSameNameMirrors(filterMirroredManifests(rows))),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }

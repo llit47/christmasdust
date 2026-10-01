@@ -511,3 +511,60 @@ test('persisted probable-map-only servers are removed on restore and stay absent
   await restored.init();
   assert.deepEqual(restored.snapshot().servers.map(row => [row.id, row.classification.confidence]), expected);
 });
+
+test('cached strong maps preserve visibility without renewing theme-observation state', async () => {
+  for (const map of ['de_dust2_xmas', 'custom_christmas_arena']) {
+    const server = { ...a, name: 'Public Server', map };
+    const { monitor, advance } = fixture({
+      discover: async () => ({ servers: [server], successfulRequests: 1, partial: false }),
+      query: async () => ({ name: 'Public Server', map, numplayers: 12, maxplayers: 32 })
+    });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+    const lastMatch = monitor.servers.get(a.id).lastThemeMatchAt;
+    monitor.query = async () => ({ name: 'Public Server' });
+    advance(Math.floor(monitor.config.retention / 2)); await monitor.run('live');
+    const retained = monitor.servers.get(a.id);
+    assert.equal(retained.lastThemeMatchAt, lastMatch);
+    assert.equal(retained.lastSeenAt, monitor.now()); // Successful queries still update liveness.
+    assert.equal(monitor.snapshot().servers[0].map, map);
+    assert.ok(retained.classification.signals.some(signal => signal.field === 'map' && signal.points > 0 &&
+      ['known-strong-map', 'explicit'].includes(signal.kind)));
+    const previous = { ...retained, themeMisses: 1 };
+    const cachedOnly = monitor.themeObservation({ name: 'Public Server' }, previous, false);
+    assert.equal(cachedOnly.themeMisses, 1); assert.equal(cachedOnly.lastThemeMatchAt, lastMatch);
+    const observed = monitor.themeObservation({ name: 'XMAS Public Server' }, previous, false);
+    assert.equal(observed.themeMisses, 0); assert.equal(observed.lastThemeMatchAt, monitor.now());
+    advance(Math.floor(monitor.config.retention / 2) - 1); await monitor.run('live');
+    assert.equal(monitor.servers.get(a.id).lastThemeMatchAt, lastMatch);
+    advance(2); monitor.prune();
+    assert.equal(monitor.servers.has(a.id), true); // Active high confidence does not expire on theme age alone.
+    assert.equal(monitor.servers.get(a.id).lastThemeMatchAt, lastMatch);
+    assert.equal(monitor.snapshot().servers[0].map, map);
+    monitor.query = async () => ({ name: 'Public Server', map: 'de_dust2' });
+    await monitor.run('live');
+    const ordinary = monitor.servers.get(a.id);
+    assert.equal(ordinary.classification.confidence, 'none');
+    assert.ok(!ordinary.classification.signals.some(signal => signal.field === 'map' && signal.points > 0));
+    assert.equal(monitor.snapshot().servers.length, 0);
+    monitor.prune();
+    assert.equal(monitor.servers.has(a.id), false); // Theme retention expiry applies once classification is none.
+  }
+});
+
+test('old theme timestamps expire only none-confidence candidates while active high/probable servers stay', () => {
+  const { monitor, advance } = fixture();
+  monitor.add({ ...a, map: 'de_dust2' });
+  monitor.add({ ...b, name: 'Winter Community', map: 'cs_alpin' });
+  const pending = parseAddress('9.9.9.9:27015');
+  monitor.add({ ...pending, name: 'Public Server', map: 'de_dust2', candidateOnly: true });
+  const lastMatch = monitor.now();
+  advance(monitor.config.retention + 1);
+  for (const row of monitor.servers.values()) {
+    row.lastSeenAt = monitor.now(); row.status = 'online'; row.lastThemeMatchAt = lastMatch;
+  }
+  monitor.prune();
+  assert.equal(monitor.servers.get(a.id).classification.confidence, 'high');
+  assert.equal(monitor.servers.get(b.id).classification.confidence, 'probable');
+  assert.equal(monitor.servers.has(pending.id), false);
+  assert.equal(monitor.snapshot().servers.length, 2);
+});
