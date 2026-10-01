@@ -32,14 +32,32 @@ export function liveManifestFingerprint(raw) {
     ...fields.map(field => optional(info[field]))]);
 }
 
-export function filterMirroredManifests(rows) {
+function manifestGroups(rows) {
   const groups = new Map();
   for (const row of rows) {
     if (row.stale || row.status !== 'online' || row.misses || !row.liveManifestFingerprint) continue;
     const ips = groups.get(row.liveManifestFingerprint) ?? new Set();
     ips.add(row.ip); groups.set(row.liveManifestFingerprint, ips);
   }
-  // Remove every matching member, never a representative. Keep internal records untouched.
-  return rows.filter(row => !(groups.get(row.liveManifestFingerprint)?.size >= 3))
-    .map(({ liveManifestFingerprint, ...row }) => row);
+  return groups;
+}
+
+export function establishManifests(rows, observedIds, now, staleAfter) {
+  const fresh = rows.filter(row => row.lastSeenAt && now - row.lastSeenAt <= staleAfter &&
+    row.status === 'online' && !row.misses && row.liveManifestFingerprint);
+  const groups = manifestGroups(fresh);
+  // Evaluate the completed batch, so query order cannot establish an initial cluster.
+  for (const row of fresh) {
+    if (observedIds.has(row.id) && groups.get(row.liveManifestFingerprint)?.size < 3)
+      row.establishedManifestFingerprint = row.liveManifestFingerprint;
+  }
+}
+
+export function filterMirroredManifests(rows) {
+  const groups = manifestGroups(rows);
+  // Preserve prior independent evidence and operator includes, not a chosen representative.
+  return rows.filter(row => row.curated ||
+    (row.liveManifestFingerprint && row.establishedManifestFingerprint === row.liveManifestFingerprint) ||
+    !(groups.get(row.liveManifestFingerprint)?.size >= 3))
+    .map(({ liveManifestFingerprint, establishedManifestFingerprint, curated, ...row }) => row);
 }

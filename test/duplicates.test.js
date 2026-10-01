@@ -111,6 +111,8 @@ test('cached API exposes duplicate counts and endpoint IDs, never internal finge
   assert.deepEqual(body.servers[0].duplicateEndpoints, [endpoints[0] === body.servers[0].id ? endpoints[1] : endpoints[0]]);
   assert.equal(Object.hasOwn(body.servers[0], 'a2sFingerprint'), false);
   assert.equal(Object.hasOwn(body.servers[0], 'liveManifestFingerprint'), false);
+  assert.equal(Object.hasOwn(body.servers[0], 'establishedManifestFingerprint'), false);
+  assert.equal(Object.hasOwn(body.servers[0], 'curated'), false);
 });
 
 test('partial live A2S data ends grouping while failed queries retain last good endpoints', async () => {
@@ -165,6 +167,74 @@ test('two identical manifests are insufficient and multiple ports do not count a
   assert.equal(sameIp.snapshot().servers.length, 3);
 });
 
+test('an established standalone manifest survives later clones and snapshot restore', async () => {
+  const ids = endpoints.slice(0, 3); let persisted;
+  const store = { load: async () => null, save: async value => { persisted = value; } };
+  const monitor = await fixture([ids[0]], row => distinctInfo(row), store);
+  assert.equal(monitor.servers.get(ids[0]).establishedManifestFingerprint,
+    monitor.servers.get(ids[0]).liveManifestFingerprint);
+  monitor.discover = async () => ({ servers: ids.map(id => discovery(id)), successfulRequests: 1, partial: false });
+  await monitor.run('discovery'); await monitor.run('live');
+  assert.deepEqual(monitor.snapshot().servers.map(row => row.id), [ids[0]]);
+  assert.equal(monitor.snapshot().servers[0].players, 12);
+  assert.equal(monitor.servers.size, 3); assert.equal(persisted.servers.length, 3);
+  assert.ok(persisted.servers[0].establishedManifestFingerprint);
+  assert.ok(persisted.servers.slice(1).every(row => !row.establishedManifestFingerprint));
+  const restored = new Monitor({ config: readConfig({}), rules, query: row => distinctInfo(row),
+    store: { load: async () => persisted, save: async () => {} }, now: () => 1000000, log: { warn() {} } });
+  await restored.init(); await restored.run('live');
+  assert.deepEqual(restored.snapshot().servers.map(row => row.id), [ids[0]]);
+  // Evidence protects its exact manifest, not all future manifests on the endpoint.
+  restored.query = row => distinctInfo(row, 11);
+  await restored.run('live');
+  assert.equal(restored.snapshot().servers.length, 0);
+  restored.query = row => distinctInfo(row, row.id === ids[0] ? 10 : 11);
+  await restored.run('live');
+  assert.equal(restored.snapshot().servers.length, 3);
+});
+
+test('failed and partial standalone queries do not establish protection from later clones', async () => {
+  const ids = endpoints.slice(0, 3);
+  for (const query of [async () => { throw Error('timeout'); }, async () => ({ name: 'Christmas Dust', numplayers: 12 })]) {
+    const monitor = await fixture([ids[0]], query);
+    assert.equal(monitor.servers.get(ids[0]).establishedManifestFingerprint, undefined);
+    monitor.query = row => distinctInfo(row);
+    monitor.discover = async () => ({ servers: ids.map(id => discovery(id)), successfulRequests: 1, partial: false });
+    await monitor.run('discovery'); await monitor.run('live');
+    assert.equal(monitor.snapshot().servers.length, 0);
+    assert.ok([...monitor.servers.values()].every(row => !row.establishedManifestFingerprint));
+  }
+});
+
+test('a live observation that ages stale during its batch cannot establish protection', async () => {
+  const ids = endpoints.slice(0, 3);
+  const monitor = await fixture([], () => ({}));
+  ids.slice(0, 2).forEach(id => monitor.add(discovery(id)));
+  monitor.query = async row => {
+    if (row.id === ids[0]) return distinctInfo(row);
+    await new Promise(resolve => setImmediate(resolve));
+    monitor.now = () => 1000000 + monitor.config.staleAfter + 1;
+    throw Error('delayed timeout');
+  };
+  await monitor.run('live');
+  assert.ok(monitor.snapshot().servers.find(row => row.id === ids[0]).stale);
+  assert.ok([...monitor.servers.values()].every(row => !row.establishedManifestFingerprint));
+  monitor.add(discovery(ids[2])); monitor.query = row => distinctInfo(row);
+  await monitor.run('live');
+  assert.equal(monitor.snapshot().servers.length, 0);
+});
+
+test('operator includes are exempt from manifest hiding without standalone evidence', async () => {
+  const ids = endpoints.slice(0, 3);
+  const monitor = await fixture(ids, row => distinctInfo(row));
+  assert.equal(monitor.snapshot().servers.length, 0);
+  monitor.rules = { ...rules, include: [discovery(ids[0])] };
+  await monitor.run('discovery'); await monitor.run('live');
+  assert.deepEqual(monitor.snapshot().servers.map(row => row.id), [ids[0]]);
+  assert.equal(monitor.snapshot().servers[0].classification.confidence, 'curated');
+  assert.equal(monitor.servers.get(ids[0]).establishedManifestFingerprint, undefined);
+});
+
 test('different player counts or maps prevent exact manifest clusters', async () => {
   const ids = endpoints.slice(0, 3);
   const players = await fixture(ids, row => distinctInfo(row, row.id === ids[2] ? 11 : 12));
@@ -182,7 +252,7 @@ test('partial, failed and stale observations cannot supply the third manifest ma
   assert.equal(monitor.snapshot().servers.length, 3);
   monitor.query = row => distinctInfo(row);
   await monitor.run('live');
-  assert.equal(monitor.snapshot().servers.length, 0);
+  assert.deepEqual(monitor.snapshot().servers.map(row => row.id).sort(), ids.slice(0, 2).sort());
   monitor.servers.get(ids[2]).lastSeenAt -= monitor.config.staleAfter + 1;
   assert.equal(monitor.snapshot().servers.length, 3);
   await monitor.run('live');
