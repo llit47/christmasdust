@@ -1,5 +1,5 @@
 import { readConfig, loadDetection } from './config/index.js';
-import { steamDiscovery } from './services/discovery.js';
+import { combinedDiscovery } from './services/combined-discovery.js';
 import { gameQuery } from './services/query.js';
 import { loadGeoip } from './services/geoip.js';
 import { Monitor } from './services/monitor.js';
@@ -9,12 +9,12 @@ async function main() {
   const config = readConfig();
   const rules = await loadDetection(config.detectionPath);
   const geoip = await loadGeoip(config.geoipPath);
-  const monitor = new Monitor({ config, rules, geoip, discover: steamDiscovery(config, rules), query: gameQuery(config), store: new SnapshotStore(config.snapshotPath) });
+  const monitor = new Monitor({ config, rules, geoip, discover: combinedDiscovery(config, rules), query: gameQuery(config), store: new SnapshotStore(config.snapshotPath) });
   await monitor.init();
   const app = createApp({ config, monitor, geoip });
   const server = app.listen(config.port, config.host, () => {
     console.info(`ChristmasDust listening on ${config.host}:${config.port}`);
-    if (!config.steamKey && config.discoveryMode !== 'seeds') console.warn('Steam discovery unavailable: configure STEAM_API_KEY; serving configured seeds');
+    if (!config.steamKey && config.discoveryMode !== 'seeds') console.warn('Steam Web API unavailable: configure STEAM_API_KEY; using master discovery and configured seeds');
     monitor.start();
   });
   server.requestTimeout = 15000; server.headersTimeout = 10000;

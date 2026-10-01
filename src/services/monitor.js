@@ -51,15 +51,24 @@ export class Monitor {
     const previous = this.servers.get(address.id);
     const discoveryTags = typeof raw.tags === 'string' ? cleanText(raw.tags) : previous?.discoveryTags;
     const discoveryDescription = typeof raw.description === 'string' ? cleanText(raw.description) : previous?.discoveryDescription;
-    const discoverySources = Array.isArray(raw.discoverySources) ? raw.discoverySources : previous?.discoverySources;
+    const discoverySources = Array.isArray(raw.discoverySources) ?
+      [...new Set([...(previous?.discoverySources || []), ...raw.discoverySources])] : previous?.discoverySources;
     const { retire, ...theme } = this.themeObservation({ ...raw, tags: discoveryTags, description: discoveryDescription,
       discoverySources }, previous, curated);
-    if (retire) { this.servers.delete(address.id); return; }
+    if (retire) {
+      if (!previous && raw.candidateOnly === true) Object.assign(theme, { classification: classify({}, this.rules), themeMisses: 0 });
+      else { this.servers.delete(address.id); return; }
+    }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
+    // Endpoint-only master samples must not fill the monitor with unverified servers.
+    if (!previous && !curated && raw.candidateOnly === true && [...this.servers.values()].filter(row =>
+      row.classification.confidence === 'none' && row.discoverySources?.includes('master-udp')).length >= 128) {
+      this.state.discoveryPartial = true; return;
+    }
     // Discovery metadata must not overwrite a trustworthy live response.
     this.servers.set(address.id, { ...metadata(raw), ...address, status: 'unknown', misses: 0,
       lastSeenAt: null, lastQueryAt: null, ...previous, ...this.geoip(address.ip), discoveryTags, discoveryDescription, discoverySources, ...theme,
-      discoveredAt: theme.classification.confidence === 'none' ? previous.discoveredAt : this.now(), curated });
+      discoveredAt: theme.classification.confidence === 'none' ? previous?.discoveredAt ?? this.now() : this.now(), curated });
   }
   prune() {
     const included = new Set(this.rules.include.map(r => r.id));
