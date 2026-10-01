@@ -17,7 +17,7 @@ const endpoints = ['8.8.8.8:27015', '1.1.1.1:27015', '9.9.9.9:27015', '4.2.2.2:2
 const rows = (count = 5) => endpoints.slice(0, count).map(id => ({ ...parseAddress(id), name, map: 'de_dust2',
   status: 'online', stale: false, misses: 0, backendQueryMs: 40, players: 12,
   classification: classify({ name, map: 'de_dust2' }, rules) }));
-const select = values => filterSameNameMirrors(values, rules);
+const select = values => filterSameNameMirrors(values);
 const total = values => values.reduce((sum, row) => sum + row.players, 0);
 
 test('four distinct IPs remain visible; five retain exactly one stable endpoint without summing players', () => {
@@ -49,7 +49,7 @@ test('case, spacing and punctuation variations form the same repeated-name clust
 test('known strong maps, explicit Christmas/Xmas maps and curated entries are exempt', () => {
   const ordinary = rows();
   const exempt = ['de_dust2_xmas', 'custom_christmas_arena', 'custom_x-mas_arena'].map((map, i) => ({
-    ...rows(1)[0], ...parseAddress(`8.8.8.${i + 10}:27015`), map
+    ...rows(1)[0], ...parseAddress(`8.8.8.${i + 10}:27015`), map, classification: classify({ name, map }, rules)
   }));
   exempt.push({ ...rows(1)[0], ...parseAddress('8.8.8.20:27015'), curated: true,
     classification: classify({}, rules, true) });
@@ -58,7 +58,8 @@ test('known strong maps, explicit Christmas/Xmas maps and curated entries are ex
   assert.ok(exempt.every(row => selected.includes(row)));
   // Exempt IPs cannot supply the fifth eligible address.
   assert.deepEqual(select([...ordinary.slice(0, 4), ...exempt]), [...ordinary.slice(0, 4), ...exempt]);
-  assert.equal(select(rows().map(row => ({ ...row, map: 'de_dust2_xmas' }))).length, 5);
+  assert.equal(select(rows().map(row => ({ ...row, map: 'de_dust2_xmas',
+    classification: classify({ name, map: 'de_dust2_xmas' }, rules) }))).length, 5);
 });
 
 test('fresh/responding representatives prefer fewer misses, measured latency, then endpoint ID', () => {
@@ -88,8 +89,10 @@ test('name or map divergence restores visibility when eligible IPs fall below th
   const values = rows(); assert.equal(select(values).length, 1);
   values[4].name = 'Other Community XMAS'; assert.equal(select(values).length, 5);
   values[4].name = name; assert.equal(select(values).length, 1);
-  values[4].map = 'custom_xmas_arena'; assert.equal(select(values).length, 5);
-  values[4].map = 'de_mirage'; assert.equal(select(values).length, 1);
+  values[4].map = 'custom_xmas_arena'; values[4].classification = classify(values[4], rules);
+  assert.equal(select(values).length, 5);
+  values[4].map = 'de_mirage'; values[4].classification = classify(values[4], rules);
+  assert.equal(select(values).length, 1);
 });
 
 async function monitorFixture(store, ids = endpoints.slice(0, 5)) {
@@ -144,4 +147,26 @@ test('backend snapshot includes strong-map and operator-included members beside 
   assert.deepEqual(visible.map(row => row.id).sort(), [ids[0], ids[5], ids[6]].sort());
   assert.equal(monitor.servers.size, 7);
   assert.equal(visible.find(row => row.id === ids[5]).classification.confidence, 'curated');
+  monitor.query = query; // Returning to an ordinary map removes the exemption through live classification.
+  await monitor.run('live');
+  assert.deepEqual(monitor.snapshot().servers.map(row => row.id).sort(), [ids[0], ids[5]].sort());
+});
+
+test('strong-map exemptions use only positive precomputed map signals without reading maps again', () => {
+  for (const signal of [
+    { field: 'map', kind: 'known-strong-map', points: 12 },
+    { field: 'map', kind: 'explicit', points: 8 },
+    { field: 'map', kind: 'explicit', points: 0 },
+    { field: 'map', kind: 'known-strong-map', points: -1 },
+    { field: 'name', kind: 'explicit', points: 9 },
+    { field: 'map', kind: 'known-probable-map', points: 5 }
+  ]) {
+    const values = rows();
+    values[4].classification = { confidence: 'high', signals: [signal] };
+    for (const row of values) Object.defineProperty(row, 'map', { get() { throw Error('Map must not be reclassified during snapshot reads'); } });
+    const exempt = signal.field === 'map' && signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind);
+    assert.equal(select(values).length, exempt ? 5 : 1, JSON.stringify(signal));
+  }
+  const legacy = rows().map(row => ({ ...row, classification: { confidence: 'high' } }));
+  assert.equal(select(legacy).length, 1); // Missing signals do not imply strong map evidence.
 });

@@ -1,4 +1,3 @@
-import { classify } from './classify.js';
 import { cleanText } from './server.js';
 
 const normalizedName = value => cleanText(value).normalize('NFKC').toLowerCase()
@@ -8,12 +7,13 @@ const compare = (a, b) => (a.misses ?? 0) - (b.misses ?? 0) || latency(a) - late
   (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 // A visibility filter only: preserve the endpoint records for monitoring and persistence.
-export function filterSameNameMirrors(rows, rules) {
+export function filterSameNameMirrors(rows) {
   const groups = new Map();
   for (const row of rows) {
     if (row.stale || row.status !== 'online' || row.curated || row.classification?.confidence === 'curated') continue;
-    // Reuse current map classification, including operator terms and token normalization.
-    if (classify({ map: row.map }, rules).confidence === 'high') continue;
+    // Live updates and snapshot restoration already compute these map signals.
+    if (row.classification?.signals?.some(signal => signal.field === 'map' && signal.points > 0 &&
+      ['known-strong-map', 'explicit'].includes(signal.kind))) continue;
     const name = normalizedName(row.name);
     if (!name) continue;
     const group = groups.get(name) ?? { ips: new Set(), members: [] };
