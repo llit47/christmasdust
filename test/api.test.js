@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createApp } from '../src/routes/app.js';
-import { PlayerStatsStore } from '../src/storage/player-stats.js';
+import { PlayerStatsStore, SAMPLE_MS } from '../src/storage/player-stats.js';
 import { readConfig } from '../src/config/index.js';
 async function fixture(t, env = {}, extras = {}) {
   const calls = []; const monitor = { ready: true, busy: null, snapshot: () => ({ servers: [], meta: { stale: true } }), run: async kind => { calls.push(kind); } };
@@ -97,4 +97,90 @@ test('history database read failure and absence leave the ordinary server API un
   assert.deepEqual((await (await get('/api/servers')).json()).servers, snapshot.servers);
   const absent = await fixture(t); assert.equal((await absent.get('/api/player-history')).status, 503);
   assert.equal((await absent.get('/api/servers')).status, 200);
+});
+
+const historyFor = (ids, timestamp) => ({ startAt: timestamp, bucketMs: 1800000,
+  histories: Object.fromEntries(ids.map(id => [id, Array(48).fill(null)])) });
+
+test('history cache shares aggregation and serialized JSON across requests with the same public ID set', async t => {
+  const a = '8.8.8.8:27015', b = '1.1.1.1:27015';
+  let reads = 0, serializations = 0;
+  const stats = { history(ids, timestamp) {
+    reads++;
+    const data = historyFor(ids, timestamp);
+    return { toJSON() { serializations++; return data; } };
+  } };
+  const { get, monitor } = await fixture(t, {}, { stats, now: () => 1000000 });
+  monitor.snapshot = () => ({ servers: [{ id: a }, { id: b }], meta: {} });
+  const first = await get('/api/player-history');
+  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'no-store');
+  assert.match(first.headers.get('content-type'), /^application\/json/);
+  const payload = await first.text();
+  assert.deepEqual(JSON.parse(payload), historyFor([b, a], 1000000));
+  monitor.snapshot = () => ({ servers: [{ id: b, players: 12 }, { id: a }], meta: { lastLiveAt: 1000001 } });
+  for (let i = 0; i < 3; i++) {
+    const response = await get('/api/player-history', { headers: { Cookie: `visitor=${i}` } });
+    assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(await response.text(), payload);
+  }
+  assert.equal(reads, 1); assert.equal(serializations, 1);
+});
+
+test('history cache rebuilds when public IDs change and never serves removed or hidden endpoints', async t => {
+  const a = '8.8.8.8:27015', b = '1.1.1.1:27015', c = '9.9.9.9:27015';
+  const reads = [];
+  const stats = { history(ids, timestamp) { reads.push(ids); return historyFor(ids, timestamp); } };
+  const { get, monitor } = await fixture(t, {}, { stats, now: () => 1000000 });
+  monitor.snapshot = () => ({ servers: [{ id: a }, { id: b }], meta: {} });
+  assert.deepEqual(Object.keys((await (await get('/api/player-history')).json()).histories), [b, a]);
+  monitor.snapshot = () => ({ servers: [{ id: a, duplicateEndpoints: [b] }, { id: c }], meta: {} });
+  const changed = await (await get('/api/player-history')).json();
+  assert.deepEqual(Object.keys(changed.histories), [a, c]);
+  assert.equal(Object.hasOwn(changed.histories, b), false);
+  assert.deepEqual(reads, [[b, a], [a, c]]);
+  await get('/api/player-history'); assert.equal(reads.length, 2);
+  monitor.snapshot = () => ({ servers: [], meta: {} });
+  assert.deepEqual((await (await get('/api/player-history')).json()).histories, {});
+  await get('/api/player-history'); assert.equal(reads.length, 3);
+});
+
+test('history cache expires after one sampling interval without extending expiry on cache hits', async t => {
+  let timestamp = 1000000, reads = 0;
+  const stats = { history(ids, at) { reads++; return historyFor(ids, at); } };
+  const { get } = await fixture(t, {}, { stats, now: () => timestamp });
+  const initial = await (await get('/api/player-history')).json();
+  timestamp += SAMPLE_MS - 1;
+  assert.deepEqual(await (await get('/api/player-history')).json(), initial);
+  assert.equal(reads, 1);
+  timestamp++;
+  const refreshed = await (await get('/api/player-history')).json();
+  assert.equal(refreshed.startAt, timestamp); assert.equal(reads, 2);
+  await get('/api/player-history'); assert.equal(reads, 2);
+});
+
+test('history cache never caches failures and retries immediately, including after a cached success expires', async t => {
+  let timestamp = 1000000, reads = 0, fail = true;
+  const stats = { history(ids, at) { reads++; if (fail) throw Error('SQLite failure'); return historyFor(ids, at); } };
+  const { get } = await fixture(t, {}, { stats, now: () => timestamp });
+  const failure = await get('/api/player-history');
+  assert.equal(failure.status, 503); assert.equal(failure.headers.get('cache-control'), 'no-store');
+  fail = false;
+  assert.equal((await get('/api/player-history')).status, 200); assert.equal(reads, 2);
+  await get('/api/player-history'); assert.equal(reads, 2);
+  timestamp += SAMPLE_MS; fail = true;
+  assert.equal((await get('/api/player-history')).status, 503); assert.equal(reads, 3);
+  fail = false;
+  assert.equal((await get('/api/player-history')).status, 200); assert.equal(reads, 4);
+});
+
+test('history cache does not retain a result whose JSON serialization fails', async t => {
+  let reads = 0;
+  const stats = { history(ids, timestamp) {
+    if (++reads === 1) return { toJSON() { throw Error('Serialization failure'); } };
+    return historyFor(ids, timestamp);
+  } };
+  const { get } = await fixture(t, {}, { stats, now: () => 1000000 });
+  assert.equal((await get('/api/player-history')).status, 503);
+  assert.equal((await get('/api/player-history')).status, 200);
+  await get('/api/player-history'); assert.equal(reads, 2);
 });

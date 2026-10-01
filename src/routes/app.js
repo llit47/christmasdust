@@ -1,6 +1,7 @@
 import express from 'express';
 import { ratingRoutes, voterHash } from './ratings.js';
 import { groupEndpointIds } from '../storage/ratings.js';
+import { SAMPLE_MS } from '../storage/player-stats.js';
 import helmet from 'helmet';
 import proxyaddr from 'proxy-addr';
 import { timingSafeEqual } from 'node:crypto';
@@ -26,11 +27,24 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now,
   if (ratings) app.use('/api/ratings', ratingRoutes({ monitor, ratings, now }));
   app.get('/api/health', (_req, res) => res.json({ version, revision, status: 'ok', ready: monitor.ready, ...monitor.snapshot().meta }));
   app.get('/api/ready', (_req, res) => res.status(monitor.ready ? 200 : 503).json({ version, revision, ready: monitor.ready }));
+  let historyCache = null;
   app.get('/api/player-history', (_req, res) => {
     try {
       if (!stats) throw new Error('History unavailable');
-      res.json(stats.history(monitor.snapshot().servers.map(server => server.id), now()));
-    } catch { res.status(503).json({ error: 'Player history unavailable' }); }
+      const ids = [...new Set(monitor.snapshot().servers.map(server => server.id))].sort();
+      const key = JSON.stringify(ids);
+      const timestamp = now();
+      // One shared entry, checked against current visibility on every request.
+      if (!historyCache || historyCache.key !== key || timestamp < historyCache.createdAt ||
+        timestamp - historyCache.createdAt >= SAMPLE_MS) {
+        const payload = JSON.stringify(stats.history(ids, timestamp));
+        historyCache = { key, createdAt: timestamp, payload };
+      }
+      res.type('json').send(historyCache.payload);
+    } catch {
+      historyCache = null;
+      res.status(503).json({ error: 'Player history unavailable' });
+    }
   });
   app.get('/api/servers', (req, res) => {
     let countryCode = geoip(req.ip).countryCode ?? null;
