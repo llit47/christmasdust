@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.3.0
+
+- Add bounded Valve Master UDP discovery alongside Steam Web API discovery.
+- Require live GameDig verification before showing master-only candidates.
+- Hide servers reporting more than 32 slots.
+- Hide suspicious groups with identical live server manifests, while protecting established and curated servers.
+- Recycle unverified master candidates after three consecutive failed live queries.
+- Rate-limit master queries and bound discovery time, with rotating coverage and safe handling of partial failures.
+
+## 0.2.0
 
 - Persist browser search, filters, and sort preferences locally, with safe fallback when server options change.
 - Add personal Hidden servers with endpoint-aware grouping and restore controls; favorites remain independent.
