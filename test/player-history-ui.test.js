@@ -29,8 +29,38 @@ test('native SVG splits null gaps, renders measured zero at baseline and scales 
   const low = points(); low[0] = 1; low[1] = 2;
   assert.match(playerSparkline(document, low, 32).children[1].attributes.d, /22.31.*21.63/);
   assert.equal(playerSparkline(document, points(), 32), null);
-  low[1] = null; assert.equal(playerSparkline(document, low, 32), null);
+  low[1] = null;
+  assert.equal(playerSparkline(document, low, 32).children[1].tag, 'circle');
   assert.equal(playerSparkline(document, ['<script>'], 32), null);
+});
+
+test('isolated measured samples render visible circles without connecting null gaps', () => {
+  const history = points(); history[0] = 0; history[2] = 16; history[47] = 32;
+  const svg = playerSparkline(document, history, 32);
+  assert.equal(svg.attributes.viewBox, '0 0 60 24');
+  assert.equal(svg.attributes['aria-label'], '24 hour player history, average 16, peak 32');
+  assert.equal(svg.children[0].textContent, svg.attributes['aria-label']);
+  assert.equal(svg.children.some(node => node.tag === 'path'), false);
+  const markers = svg.children.filter(node => node.tag === 'circle');
+  assert.equal(markers.length, 3);
+  assert.ok(markers.every(node => node.ns === 'http://www.w3.org/2000/svg'));
+  assert.deepEqual(markers.map(node => node.attributes), [
+    { cx: '1.00', cy: '23.00', r: '1', fill: 'currentColor' },
+    { cx: '3.47', cy: '12.00', r: '1', fill: 'currentColor' },
+    { cx: '59.00', cy: '1.00', r: '1', fill: 'currentColor' }
+  ]);
+  const zeros = points(); zeros[0] = zeros[47] = 0;
+  assert.deepEqual(playerSparkline(document, zeros, 32).children.slice(1).map(node => [node.tag, node.attributes.cy]),
+    [['circle', '23.00'], ['circle', '23.00']]);
+});
+
+test('singleton markers and contiguous paths coexist without crossing gaps', () => {
+  const history = points(); history[0] = 0; history[2] = 16; history[3] = 32; history[47] = 0;
+  const svg = playerSparkline(document, history, 32);
+  assert.deepEqual(svg.children.slice(1).map(node => node.tag), ['circle', 'path', 'circle']);
+  assert.equal(svg.children[2].attributes.d, 'M3.47,12.00 L4.70,1.00');
+  assert.equal(svg.children[1].attributes.cy, '23.00');
+  assert.equal(svg.children[3].attributes.cy, '23.00');
 });
 
 test('sparkline and count share the same population row with existing open slots below', () => {

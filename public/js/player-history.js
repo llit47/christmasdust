@@ -5,7 +5,7 @@ export function playerSparkline(document, points, maxPlayers) {
   if (!Array.isArray(points) || points.length !== 48 || points.some(value =>
     value !== null && (!Number.isFinite(value) || value < 0 || value > 65535))) return null;
   const measured = points.filter(value => value !== null);
-  if (measured.length < 2) return null;
+  if (measured.length === 0) return null;
   const peak = Math.max(...measured);
   const average = measured.reduce((sum, value) => sum + value, 0) / measured.length;
   const scale = Number.isFinite(maxPlayers) && maxPlayers > 0 ? maxPlayers : Math.max(1, peak);
@@ -22,6 +22,12 @@ export function playerSparkline(document, points, maxPlayers) {
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('d', segment.map((point, index) => `${index ? 'L' : 'M'}${point}`).join(' '));
       svg.append(path);
+    } else if (segment.length === 1) {
+      const [x, y] = segment[0].split(',');
+      const marker = document.createElementNS(SVG_NS, 'circle');
+      marker.setAttribute('cx', x); marker.setAttribute('cy', y);
+      marker.setAttribute('r', '1'); marker.setAttribute('fill', 'currentColor');
+      svg.append(marker);
     }
     segment = [];
   };
