@@ -1,3 +1,4 @@
+import { filterSameNameMirrors } from '../domain/name-mirrors.js';
 import { classify } from '../domain/classify.js';
 import { metadata, liveMetadata, cleanText } from '../domain/server.js';
 import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
@@ -146,7 +147,7 @@ export class Monitor {
     const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none' && !(s.maxPlayers > 32)).map(({ discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' }));
-    return { servers: groupDuplicates(filterMirroredManifests(rows)),
+    return { servers: groupDuplicates(filterSameNameMirrors(filterMirroredManifests(rows), this.rules)),
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }
