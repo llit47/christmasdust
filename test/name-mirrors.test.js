@@ -170,3 +170,40 @@ test('strong-map exemptions use only positive precomputed map signals without re
   const legacy = rows().map(row => ({ ...row, classification: { confidence: 'high' } }));
   assert.equal(select(legacy).length, 1); // Missing signals do not imply strong map evidence.
 });
+
+test('incomplete successful live replies retain last-good strong map evidence until a measured map changes', async () => {
+  for (const map of ['de_dust2_xmas', 'custom_christmas_arena']) {
+    let persisted;
+    const ids = endpoints.slice(0, 6), target = ids[5];
+    const { monitor } = await monitorFixture({ load: async () => null, save: async value => { persisted = value; } }, ids);
+    await monitor.run('discovery');
+    const query = monitor.query;
+    let phase = 'strong';
+    monitor.query = async row => {
+      const raw = await query(row);
+      if (row.id !== target) return raw;
+      if (phase === 'incomplete') { const { map: _map, ...partial } = raw; return partial; }
+      return { ...raw, map: phase === 'strong' ? map : 'de_dust2' };
+    };
+    await monitor.run('live');
+    const original = monitor.snapshot().servers.find(row => row.id === target);
+    assert.ok(original); assert.equal(original.map, map);
+    const mapSignals = original.classification.signals.filter(signal => signal.field === 'map');
+    assert.ok(mapSignals.some(signal => signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind)));
+    assert.equal(monitor.snapshot().servers.length, 2);
+    phase = 'incomplete'; await monitor.run('live');
+    const partial = monitor.snapshot().servers.find(row => row.id === target);
+    assert.ok(partial); assert.equal(partial.name, name); assert.equal(partial.map, map);
+    assert.equal(partial.status, 'online'); assert.equal(partial.stale, false);
+    assert.deepEqual(partial.classification.signals.filter(signal => signal.field === 'map'), mapSignals);
+    assert.equal(monitor.snapshot().servers.length, 2);
+    assert.deepEqual(persisted.servers.find(row => row.id === target).classification, partial.classification);
+    phase = 'ordinary'; await monitor.run('live');
+    const updated = monitor.servers.get(target);
+    assert.equal(updated.map, 'de_dust2'); assert.equal(updated.classification.confidence, 'high');
+    assert.deepEqual(updated.classification.signals.filter(signal => signal.field === 'map'), []);
+    assert.equal(monitor.snapshot().servers.length, 1);
+    assert.equal(monitor.snapshot().servers.some(row => row.id === target), false);
+    assert.equal(persisted.servers.length, 6);
+  }
+});

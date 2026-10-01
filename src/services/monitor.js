@@ -33,7 +33,10 @@ export class Monitor {
     this.ready = true;
   }
   themeObservation(raw, previous, curated) {
-    const classification = classify(raw, this.rules, curated);
+    // An omitted map retains both the last-good metadata and its strong map evidence.
+    const retainStrongMap = !cleanText(raw.map).trim() && previous?.classification?.signals?.some(signal =>
+      signal.field === 'map' && signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind));
+    const classification = classify({ ...raw, map: retainStrongMap ? previous.map : raw.map }, this.rules, curated);
     if (classification.confidence !== 'none') return { classification, themeMisses: 0, lastThemeMatchAt: this.now(), retire: false };
     if (!previous) return { retire: true };
     // Empty/incomplete responses and query failures are not evidence of a theme change.
