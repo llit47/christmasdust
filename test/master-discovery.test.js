@@ -309,7 +309,7 @@ test('master-only endpoints enter monitoring but must pass live classification a
   const excluded = ids.at(-1); const queried = []; let persisted;
   const live = row => ({ name: 'Christmas Mirrors', map: 'de_xmas', numplayers: 12, maxplayers: 32,
     password: false, version: '1.1.2.7/Stdio', raw: { folder: 'cstrike', game: 'Counter-Strike', protocol: 48, appId: 10 },
-    ...(row.id === ids[0] ? { name: 'Public', map: 'de_aztec_hivers', numplayers: 2 } : {}),
+    ...(row.id === ids[0] ? { name: 'Winter Public', map: 'de_aztec_hivers', numplayers: 2 } : {}),
     ...(row.id === ids[1] ? { name: 'Public', map: 'fy_snow' } : {}),
     ...(row.id === ids[2] ? { maxplayers: 64 } : {}),
     ...(ids.slice(6, 8).includes(row.id) ? { name: 'Christmas Alias', numplayers: row.id === ids[6] ? 2 : 5,
@@ -336,7 +336,7 @@ test('master-only endpoints enter monitoring but must pass live classification a
   await monitor.run('discovery');
   assert.equal(monitor.snapshot().servers.length, 2);
   // A later Web-only discovery must retain the endpoint's earlier master provenance.
-  monitor.discover = async () => result([{ ...first, name: 'Public', map: 'de_aztec_hivers', discoverySources: ['web-api'] }]);
+  monitor.discover = async () => result([{ ...first, name: 'Winter Public', map: 'de_aztec_hivers', discoverySources: ['web-api'] }]);
   await monitor.run('discovery');
   assert.ok(monitor.servers.get(first.id).discoverySources.includes('master-udp'));
   assert.ok(monitor.servers.get(first.id).discoverySources.includes('web-api'));
