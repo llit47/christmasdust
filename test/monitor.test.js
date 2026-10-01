@@ -511,3 +511,33 @@ test('persisted probable-map-only servers are removed on restore and stay absent
   await restored.init();
   assert.deepEqual(restored.snapshot().servers.map(row => [row.id, row.classification.confidence]), expected);
 });
+
+test('cached strong maps preserve visibility but incomplete observations cannot renew theme retention', async () => {
+  for (const map of ['de_dust2_xmas', 'custom_christmas_arena']) {
+    const server = { ...a, name: 'Public Server', map };
+    const { monitor, advance } = fixture({
+      discover: async () => ({ servers: [server], successfulRequests: 1, partial: false }),
+      query: async () => ({ name: 'Public Server', map, numplayers: 12, maxplayers: 32 })
+    });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+    const lastMatch = monitor.servers.get(a.id).lastThemeMatchAt;
+    monitor.query = async () => ({ name: 'Public Server' });
+    advance(Math.floor(monitor.config.retention / 2)); await monitor.run('live');
+    const retained = monitor.servers.get(a.id);
+    assert.equal(retained.lastThemeMatchAt, lastMatch);
+    assert.equal(retained.lastSeenAt, monitor.now()); // Successful queries still update liveness.
+    assert.equal(monitor.snapshot().servers[0].map, map);
+    assert.ok(retained.classification.signals.some(signal => signal.field === 'map' && signal.points > 0 &&
+      ['known-strong-map', 'explicit'].includes(signal.kind)));
+    const previous = { ...retained, themeMisses: 1 };
+    const cachedOnly = monitor.themeObservation({ name: 'Public Server' }, previous, false);
+    assert.equal(cachedOnly.themeMisses, 1); assert.equal(cachedOnly.lastThemeMatchAt, lastMatch);
+    const observed = monitor.themeObservation({ name: 'XMAS Public Server' }, previous, false);
+    assert.equal(observed.themeMisses, 0); assert.equal(observed.lastThemeMatchAt, monitor.now());
+    advance(Math.floor(monitor.config.retention / 2) - 1); await monitor.run('live');
+    assert.equal(monitor.servers.get(a.id).lastThemeMatchAt, lastMatch);
+    advance(2); monitor.prune();
+    assert.equal(monitor.servers.has(a.id), false); // Recent liveness alone cannot extend seasonal retention.
+    assert.equal(monitor.snapshot().servers.length, 0);
+  }
+});

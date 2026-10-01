@@ -37,7 +37,12 @@ export class Monitor {
     const retainStrongMap = !cleanText(raw.map).trim() && previous?.classification?.signals?.some(signal =>
       signal.field === 'map' && signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind));
     const classification = classify({ ...raw, map: retainStrongMap ? previous.map : raw.map }, this.rules, curated);
-    if (classification.confidence !== 'none') return { classification, themeMisses: 0, lastThemeMatchAt: this.now(), retire: false };
+    if (classification.confidence !== 'none') {
+      const observedTheme = curated || !retainStrongMap || classification.signals.some(signal =>
+        ['name', 'tags', 'description'].includes(signal.field) && signal.points > 0);
+      return { classification, themeMisses: observedTheme ? 0 : previous.themeMisses || 0,
+        lastThemeMatchAt: observedTheme ? this.now() : previous.lastThemeMatchAt, retire: false };
+    }
     if (!previous) return { retire: true };
     // Empty/incomplete responses and query failures are not evidence of a theme change.
     if (!cleanText(raw.name).trim() || !cleanText(raw.map).trim()) {
@@ -79,7 +84,7 @@ export class Monitor {
     for (const [id, row] of this.servers) {
       const lastThemeMatch = row.lastThemeMatchAt ?? Math.max(row.lastSeenAt || 0, row.discoveredAt || 0);
       if (this.rules.exclude.has(id) || (!included.has(id) && (this.now() - Math.max(row.lastSeenAt || 0, row.discoveredAt || 0) > this.config.retention ||
-        (row.classification.confidence === 'none' && this.now() - lastThemeMatch > this.config.retention)))) this.servers.delete(id);
+        this.now() - lastThemeMatch > this.config.retention))) this.servers.delete(id);
       else if (!included.has(id) && row.curated) { row.curated = false; row.classification = classify({ ...row, tags: row.discoveryTags,
         description: row.discoveryDescription, discoverySources: row.discoverySources }, this.rules); }
     }
