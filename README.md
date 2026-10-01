@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/llit47/christmasdust/main/install.s
 
 Review downloaded scripts before running as root if preferred. Requires Debian/Ubuntu with systemd, x86_64 or ARM64, and outbound HTTPS/UDP. The installer downloads checksum-verified official Node 24 LTS, creates an unprivileged service, preserves existing configuration and checks HTTP readiness. Default URL: **http://127.0.0.1:3001**. Configure a TLS reverse proxy for public access.
 
-**Before servers appear:** add a Steam Web API key to `/etc/christmasdust/christmasdust.env`, or curated public `IP:PORT` addresses to the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust`. No sample or invented servers are shown to players. GeoIP is optional.
+**Discovery starts automatically:** default `auto` mode uses Valve master UDP without `STEAM_API_KEY`. An optional Web API key in `/etc/christmasdust/christmasdust.env` improves discovery coverage. You can also curate public `IP:PORT` addresses in the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust` after configuration changes. No sample or invented servers are shown to players. GeoIP is optional.
 
 ```sh
 sudo christmasdust update          # migrates legacy detection config; failure rolls back
@@ -34,7 +34,7 @@ git clone https://github.com/llit47/christmasdust.git
 cd christmasdust
 npm ci
 cp .env.example .env
-# Set STEAM_API_KEY, or add curated endpoints to config/detection.json.
+# auto mode uses master UDP; optional STEAM_API_KEY adds Web API coverage.
 npm start
 ```
 

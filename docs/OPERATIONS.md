@@ -50,7 +50,7 @@ Use the actual retained release and configured detection path; the example name 
 
 ## Troubleshooting
 
-- Empty list: no matches, no Steam key/seeds, invalid key, upstream filtering or firewall. See health and journal. Edit includes for missing servers; do not publish unverified fixtures.
+- Empty list: no live-verified matches, unavailable master DNS/UDP, seeds mode without includes, an invalid Web API key, upstream filtering or firewall. In `auto` mode the Web API key is optional and improves coverage. See health and journal. Edit includes for missing servers; do not publish unverified fixtures.
 - Servers unreachable: outbound UDP may be blocked, query port differs or remote rate limiting applies. Monitor latency is not player latency.
 - Stale after restart: the previous snapshot is intentionally served immediately while refresh runs.
 - Disk warning: check free space and service ownership of state directory. Memory still serves last observations but restart durability is compromised.
@@ -62,4 +62,4 @@ The admin refresh endpoint is optional. Set a generated high-entropy ADMIN_TOKEN
 
 ## Release validation still required
 
-Automated tests use injected network adapters and exercise updater success, preparation failure and rollback with temporary paths and OS/network shims; live Steam access requires a real operator key. Before public launch, verify Steam results and UDP access on the deployment host, install/update/fail-health rollback on a disposable Debian/Ubuntu VM, configure TLS, and inspect desktop/mobile behavior with real server populations. No live-network tests belong in CI.
+Automated tests use injected network adapters and exercise updater success, preparation failure and rollback with temporary paths and OS/network shims; live Web API access requires a real operator key; master UDP discovery does not. Before public launch, verify Steam results and UDP access on the deployment host, install/update/fail-health rollback on a disposable Debian/Ubuntu VM, configure TLS, and inspect desktop/mobile behavior with real server populations. No live-network tests belong in CI.

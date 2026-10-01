@@ -1,6 +1,6 @@
 # Native installation
 
-Supported: Debian 12/13 or Ubuntu 22.04/24.04 with running systemd, x86_64 or ARM64. Root is needed for setup; the web process always runs as `christmasdust`. Outbound HTTPS accesses GitHub, npm, nodejs.org and Steam; outbound UDP reaches public game query ports. Incoming HTTP defaults to loopback port 3001.
+Supported: Debian 12/13 or Ubuntu 22.04/24.04 with running systemd, x86_64 or ARM64. Root is needed for setup; the web process always runs as `christmasdust`. Outbound HTTPS accesses GitHub, npm, nodejs.org and Steam; outbound UDP reaches `hl2master.steampowered.com:27011` and public game query ports. Incoming HTTP defaults to loopback port 3001.
 
 Existing installations keep their configured `PORT` during updates; change it in `/etc/christmasdust/christmasdust.env` if moving an older installation to 3001.
 
@@ -29,7 +29,7 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
 | /usr/local/bin/christmasdust | Update/version/GeoIP setup command |
 
-Set a Steam key or curated addresses before expecting results. Add `GEOIP_PATH` for server country filtering and approximate distance. Restart after changing config. Readiness checks verify startup and restored storage initialization, not Steam availability or the presence of matching servers.
+Default `auto` mode uses Valve master UDP without `STEAM_API_KEY`. A Web API key is optional and improves discovery coverage; curated addresses can also be added to the detection include list. Add `GEOIP_PATH` for server country filtering and approximate distance. Restart after changing config. Readiness checks verify startup and restored storage initialization, not Steam availability or the presence of matching servers.
 
 ## Server country data (optional)
 
