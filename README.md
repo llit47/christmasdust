@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/llit47/christmasdust/main/install.s
 
 Review downloaded scripts before running as root if preferred. Requires Debian/Ubuntu with systemd, x86_64 or ARM64, and outbound HTTPS/UDP. The installer downloads checksum-verified official Node 24 LTS, creates an unprivileged service, preserves existing configuration and checks HTTP readiness. Default URL: **http://127.0.0.1:3001**. Configure a TLS reverse proxy for public access.
 
-**Before servers appear:** add a Steam Web API key to `/etc/christmasdust/christmasdust.env`, or curated public `IP:PORT` addresses to the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust`. No sample or invented servers are shown to players. GeoIP is optional.
+**Discovery starts automatically:** default `auto` mode uses Valve master UDP without `STEAM_API_KEY`. An optional Web API key in `/etc/christmasdust/christmasdust.env` improves discovery coverage. You can also curate public `IP:PORT` addresses in the `include` array in `/etc/christmasdust/detection.json`. Restart `christmasdust` after configuration changes. No sample or invented servers are shown to players. GeoIP is optional.
 
 ```sh
 sudo christmasdust update          # migrates legacy detection config; failure rolls back
@@ -34,7 +34,7 @@ git clone https://github.com/llit47/christmasdust.git
 cd christmasdust
 npm ci
 cp .env.example .env
-# Set STEAM_API_KEY, or add curated endpoints to config/detection.json.
+# auto mode uses master UDP; optional STEAM_API_KEY adds Web API coverage.
 npm start
 ```
 
@@ -42,7 +42,7 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 
 ## Operation at a glance
 
-- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to 20 rotating exact-map searches and five safe theme-name searches every **10 minutes**; results are classified before monitoring.
+- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to 20 rotating exact-map searches and five safe theme-name searches every **10 minutes**, plus bounded secondary Valve master UDP discovery. Master-only endpoints remain hidden pending live verification.
 - Monitoring: GameDig **counterstrike16**, every **45 seconds**, eight concurrent queries, five-second attempt timeout.
 - Browser: polls only the cached snapshot every **30 seconds**, pauses while hidden.
 - Storage: atomic JSON snapshots; failures preserve last known data with explicit age and degraded status.
@@ -56,4 +56,4 @@ API: `GET /api/servers`, `GET /api/health`, `GET /api/ready`. Optional token-pro
 
 ## MVP limits
 
-Steam discovery needs an operator-provided API key and can be incomplete or capped. Some servers do not register with Steam; include them manually. Only routable public IPv4 endpoints are supported. Steam Networking / FakeIP servers need a separate resolution/query path and are intentionally excluded rather than queried with ordinary GameDig UDP. Server country filtering and distance need an optional local GeoLite2 City MMDB; [native setup](docs/INSTALL.md#server-country-data-optional) explains `sudo christmasdust setup-geoip`. Without it, the Country control shows why filtering is unavailable. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have static checks and isolated transaction/rollback tests; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.
+Steam Web API discovery needs an operator-provided API key; bounded secondary Valve master UDP discovery also runs without a key. Both sources can be incomplete or capped. Some servers do not register with Steam; include them manually. Only routable public IPv4 endpoints are supported. Steam Networking / FakeIP servers need a separate resolution/query path and are intentionally excluded rather than queried with ordinary GameDig UDP. Server country filtering and distance need an optional local GeoLite2 City MMDB; [native setup](docs/INSTALL.md#server-country-data-optional) explains `sudo christmasdust setup-geoip`. Without it, the Country control shows why filtering is unavailable. GeoIP is approximate and supplied separately under its provider's terms. UDP filtering can make healthy game servers appear unreachable. A single monitor cannot measure visitor ping. Native deployment scripts have static checks and isolated transaction/rollback tests; a real systemd installation and rollback exercise should be performed on a disposable supported host before wider rollout.
