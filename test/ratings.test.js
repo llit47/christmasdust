@@ -174,13 +174,15 @@ test('body limit also applies to chunked JSON and other API bodies remain reject
   assert.equal(ratings.db.prepare('SELECT count(*) AS n FROM ratings').get().n, 0);
 });
 
-test('server list isolates ratings read failures and preserves the valid monitor snapshot', async t => {
+test('server list stops ratings reads after the first failure and retries on the next request', async t => {
   const { get, monitor, ratings, vote } = await fixture(t);
   const snapshot = { servers: [{ id: a, name: 'Winter', status: 'online', duplicateEndpoints: [b] },
     { id: '9.9.9.9:27015', name: 'Other' }], meta: { lastLiveAt: 123, stale: false } };
   monitor.snapshot = () => snapshot;
   const original = structuredClone(snapshot);
+  let reads = 0;
   ratings.totals = ids => {
+    reads++;
     if (ids.includes(a)) throw new Error('SQLite read failure');
     return { up: 2, down: 1, vote: null };
   };
@@ -188,8 +190,55 @@ test('server list isolates ratings read failures and preserves the valid monitor
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: { up: 0, down: 0, vote: null } });
-  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 2, down: 1, vote: null } });
+  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 0, down: 0, vote: null } });
+  assert.equal(reads, 1);
   assert.deepEqual(body.meta, { ...snapshot.meta, serverGeoipConfigured: false });
   assert.deepEqual(snapshot, original);
   assert.equal((await vote({ serverId: a, value: 1 })).status, 500);
+  ratings.totals = () => { reads++; return { up: 2, down: 1, vote: null }; };
+  const recovered = await get('/api/servers');
+  assert.equal(recovered.status, 200);
+  assert.equal(reads, 4); // Initial read, failed mutation read, then both servers on recovery.
+  assert.deepEqual((await recovered.json()).servers.map(server => server.ratings), [
+    { up: 2, down: 1, vote: null }, { up: 2, down: 1, vote: null }]);
+});
+
+test('ratings read failure preserves prior successful totals and skips every remaining server', async t => {
+  const { get, monitor, ratings } = await fixture(t);
+  const ids = [a, b, '9.9.9.9:27015', '4.4.4.4:27015'];
+  monitor.snapshot = () => ({ servers: ids.map(id => ({ id })), meta: {} });
+  const queried = [];
+  ratings.totals = endpoints => {
+    queried.push(endpoints[0]);
+    if (endpoints[0] === b) throw new Error('SQLite busy');
+    return { up: 2, down: 3, vote: 1 };
+  };
+  const response = await get('/api/servers');
+  assert.equal(response.status, 200);
+  assert.deepEqual(queried, [a, b]);
+  assert.deepEqual((await response.json()).servers.map(server => server.ratings), [
+    { up: 2, down: 3, vote: 1 }, ...ids.slice(1).map(() => ({ up: 0, down: 0, vote: null }))]);
+});
+
+test('HTTPS PUT and DELETE renew the existing HTTP voter cookie as Secure without changing identity', async t => {
+  const { vote, ratings } = await fixture(t, { TRUSTED_PROXIES: '127.0.0.1/32' });
+  const initial = await vote({ serverId: a, value: 1 });
+  assert.equal(initial.status, 200);
+  const minted = initial.headers.get('set-cookie');
+  assert.doesNotMatch(minted, /; Secure/);
+  const cookie = minted.split(';')[0];
+  const headers = { 'X-Forwarded-Proto': 'https' };
+  for (const method of ['PUT', 'DELETE']) {
+    const response = await vote(method === 'PUT' ? { serverId: a, value: -1 } : { serverId: a }, { method, cookie, headers });
+    assert.equal(response.status, 200);
+    const renewed = response.headers.get('set-cookie');
+    assert.equal(renewed.split(';')[0], cookie);
+    for (const attribute of [/; HttpOnly/, /; SameSite=Lax/, /; Secure/, /; Max-Age=31536000/, /; Path=\//, /; Expires=/])
+      assert.match(renewed, attribute);
+    if (method === 'PUT') {
+      assert.deepEqual((await response.json()).ratings, { up: 0, down: 1, vote: -1 });
+      assert.equal(ratings.db.prepare('SELECT count(*) AS n FROM ratings').get().n, 1);
+      assert.equal(ratings.db.prepare('SELECT voter_hash FROM ratings').get().voter_hash, hash(cookie.split('=')[1]));
+    } else assert.deepEqual((await response.json()).ratings, { up: 0, down: 0, vote: null });
+  }
 });

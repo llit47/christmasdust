@@ -34,10 +34,13 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now,
     }
     const snapshot = monitor.snapshot();
     const currentVoter = voterHash(req);
+    let ratingsFailed = false;
     const servers = ratings ? snapshot.servers.map(server => {
       let totals = { up: 0, down: 0, vote: null };
-      try { totals = ratings.totals(groupEndpointIds(server), currentVoter); }
-      catch { /* Informational ratings must not make a valid monitor snapshot unavailable. */ }
+      if (!ratingsFailed) {
+        try { totals = ratings.totals(groupEndpointIds(server), currentVoter); }
+        catch { ratingsFailed = true; /* Avoid repeated SQLite busy-timeout waits in this request. */ }
+      }
       return { ...server, ratings: totals };
     }) : snapshot.servers;
     res.json({ ...snapshot, servers, meta: { ...snapshot.meta, serverGeoipConfigured: Boolean(config.geoipPath) }, visitor: { countryCode }, version });

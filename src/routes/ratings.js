@@ -43,11 +43,12 @@ export function ratingRoutes({ monitor, ratings, now }) {
     const server = monitor.snapshot().servers.find(row => groupEndpointIds(row).includes(body.serverId));
     if (!server) return res.status(404).json({ error: 'Unknown server ID' });
     let token = voterToken(req);
+    const renewCookie = !token || req.secure;
     if (!token) {
       token = randomBytes(32).toString('hex');
       limited(`voter:${hash(token)}`, 20);
-      res.cookie(cookieName, token, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 365 * 86400000, path: '/' });
     }
+    if (renewCookie) res.cookie(cookieName, token, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 365 * 86400000, path: '/' });
     const result = ratings.mutate(groupEndpointIds(server), body.serverId, hash(token), req.method === 'PUT' ? body.value : null, now());
     return res.json({ serverId: server.id, ratings: result });
   });
