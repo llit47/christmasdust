@@ -4,7 +4,7 @@ import { parseEnv } from 'node:util';
 import { dirname, isAbsolute } from 'node:path';
 import { readConfig } from '../src/config/index.js';
 
-function ensureNativeRatingsPath() {
+function ensureNativeStoragePaths() {
   // Older installed updaters already execute this candidate-owned script as root.
   // Commit the additive setting before they validate/start the new release;
   // previous releases ignore it, so rollback need not undo this migration.
@@ -14,7 +14,12 @@ function ensureNativeRatingsPath() {
   if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o022))
     throw new Error('protected environment file required');
   const source = readFileSync(envPath, 'utf8');
-  if (Object.hasOwn(parseEnv(source), 'RATINGS_PATH')) return;
+  const env = parseEnv(source);
+  const additions = [
+    ['RATINGS_PATH', '/var/lib/christmasdust/ratings.sqlite'],
+    ['STATS_PATH', '/var/lib/christmasdust/player-stats.sqlite']
+  ].filter(([key]) => !Object.hasOwn(env, key)).map(([key, path]) => `${key}=${path}\n`).join('');
+  if (!additions) return;
   const directory = dirname(envPath);
   const candidate = `${envPath}.${randomUUID()}.tmp`;
   const syncDirectory = () => {
@@ -24,7 +29,7 @@ function ensureNativeRatingsPath() {
   try {
     const fd = openSync(candidate, 'wx', 0o600);
     try {
-      writeFileSync(fd, `${source}\nRATINGS_PATH=/var/lib/christmasdust/ratings.sqlite\n`);
+      writeFileSync(fd, `${source}\n${additions}`);
       fchownSync(fd, info.uid, info.gid);
       fchmodSync(fd, info.mode & 0o777);
       fsyncSync(fd);
@@ -56,7 +61,7 @@ try {
       throw new Error('unsafe detection directory');
     if (directory === dirname(directory)) break;
   }
-  ensureNativeRatingsPath();
+  ensureNativeStoragePaths();
   process.stdout.write(`${path}\n`);
 } catch {
   console.error('Native update requires an existing, root-owned detection file at an absolute DETECTION_PATH in a protected directory and a protected absolute environment file.');

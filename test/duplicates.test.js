@@ -5,6 +5,7 @@ import { readConfig, loadDetection } from '../src/config/index.js';
 import { parseAddress } from '../src/utils/address.js';
 import { a2sFingerprint } from '../src/domain/duplicates.js';
 import { liveManifestFingerprint } from '../src/domain/manifests.js';
+import { PlayerStatsStore } from '../src/storage/player-stats.js';
 import { Monitor } from '../src/services/monitor.js';
 import { createApp } from '../src/routes/app.js';
 import { rankServers } from '../public/js/ranking.js';
@@ -304,4 +305,22 @@ test('favorites follow any grouped endpoint when the representative changes', ()
   const reverted = { ...group, id: oldId, duplicateEndpoints: [newId] };
   assert.equal(isFavorite(reverted, favorites), true);
   assert.deepEqual(filterServers([reverted], filters, favorites), [reverted]);
+});
+
+
+test('history is collected for identity-grouped and manifest-suppressed endpoints', async t => {
+  for (const [ids, query, publicCount] of [
+    [endpoints.slice(0, 2), () => info(), 1],
+    [endpoints.slice(0, 3), row => distinctInfo(row), 0]
+  ]) {
+    const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+    const monitor = await fixture(ids, query); monitor.stats = stats;
+    const before = monitor.snapshot();
+    await monitor.run('live');
+    assert.deepEqual(monitor.snapshot(), before);
+    assert.equal(monitor.snapshot().servers.length, publicCount);
+    assert.equal(monitor.servers.size, ids.length);
+    assert.deepEqual(stats.db.prepare('SELECT server_id, players FROM player_samples ORDER BY server_id').all().map(row => [row.server_id, row.players]),
+      [...ids].sort().map(id => [id, 12]));
+  }
 });

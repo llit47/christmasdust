@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { once } from 'node:events';
 import { createApp } from '../src/routes/app.js';
+import { PlayerStatsStore } from '../src/storage/player-stats.js';
 import { readConfig } from '../src/config/index.js';
-async function fixture(t, env = {}) {
+async function fixture(t, env = {}, extras = {}) {
   const calls = []; const monitor = { ready: true, busy: null, snapshot: () => ({ servers: [], meta: { stale: true } }), run: async kind => { calls.push(kind); } };
-  const app = createApp({ config: readConfig(env), monitor, geoip: () => ({ countryCode: 'DE', latitude: 1, longitude: 2 }) });
+  const app = createApp({ config: readConfig(env), monitor, geoip: () => ({ countryCode: 'DE', latitude: 1, longitude: 2 }), ...extras });
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
   return { monitor, calls, get: (path, options) => fetch(`http://127.0.0.1:${server.address().port}${path}`, options) };
 }
@@ -60,4 +61,40 @@ test('all API request bodies are rejected before they can cause work', async t =
   const { get, calls } = await fixture(t, { ADMIN_TOKEN: 'a'.repeat(32) });
   assert.equal((await get('/api/admin/refresh', { method: 'POST', body: '{"target":"127.0.0.1"}', headers: { Authorization: `Bearer ${'a'.repeat(32)}` } })).status, 413);
   assert.deepEqual(calls, []);
+});
+
+
+test('history API returns only current public IDs with bounded series and no live queries', async t => {
+  const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+  const now = 100 * 86400000;
+  const a = '8.8.8.8:27015', b = '1.1.1.1:27015', hidden = '9.9.9.9:27015';
+  stats.record(a, 0, now); stats.record(b, 12, now); stats.record(hidden, 30, now);
+  const { get, monitor, calls } = await fixture(t, {}, { stats, now: () => now });
+  monitor.snapshot = () => ({ servers: [{ id: a, duplicateEndpoints: [hidden] }, { id: b }], meta: {} });
+  const response = await get(`/api/player-history?serverId=${hidden}`);
+  assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
+  const data = await response.json();
+  assert.deepEqual(Object.keys(data.histories), [b, a]);
+  assert.equal(data.bucketMs, 1800000); assert.equal(data.startAt + data.bucketMs * 48, now + data.bucketMs);
+  assert.equal(data.histories[a].length, 48); assert.equal(data.histories[a][47], 0);
+  assert.ok(data.histories[a].slice(0, 47).every(value => value === null));
+  const list = await (await get('/api/servers')).json();
+  assert.deepEqual(list.servers, monitor.snapshot().servers);
+  assert.equal(Object.hasOwn(list, 'histories'), false);
+  monitor.snapshot = () => ({ servers: [{ id: hidden }], meta: {} });
+  assert.deepEqual(Object.keys((await (await get('/api/player-history')).json()).histories), [hidden]);
+  assert.equal((await get('/api/player-history', { method: 'POST', body: '{}' })).status, 413);
+  assert.equal((await get('/api/player-history', { method: 'PUT' })).status, 404);
+  assert.deepEqual(calls, []);
+});
+
+test('history database read failure and absence leave the ordinary server API unchanged', async t => {
+  const stats = { history() { throw Error('SQLite failure'); } };
+  const { get, monitor } = await fixture(t, {}, { stats });
+  const snapshot = { servers: [{ id: '8.8.8.8:27015', players: 18 }], meta: {} };
+  monitor.snapshot = () => snapshot;
+  assert.equal((await get('/api/player-history')).status, 503);
+  assert.deepEqual((await (await get('/api/servers')).json()).servers, snapshot.servers);
+  const absent = await fixture(t); assert.equal((await absent.get('/api/player-history')).status, 503);
+  assert.equal((await absent.get('/api/servers')).status, 200);
 });

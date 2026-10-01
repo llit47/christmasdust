@@ -122,7 +122,7 @@ printf '%s\n' "$revision" > "$stage/app/REVISION"
 # No lifecycle scripts execute during deployment; the app has no build step.
 (cd "$stage/app" && runuser -u christmasdust -- npm ci --omit=dev --ignore-scripts --cache "$stage/npm-cache")
 (cd "$stage/app" && runuser -u christmasdust -- npm test && runuser -u christmasdust -- npm run check)
-# The candidate resolver also atomically supplies RATINGS_PATH to legacy env files,
+# The candidate resolver also atomically supplies RATINGS_PATH and STATS_PATH to legacy env files,
 # before startup and without needing a newer installed systemd unit.
 # Resolve exactly what systemd will pass to the staged application's loader.
 # Native installs require an absolute, existing, root-controlled operator file.

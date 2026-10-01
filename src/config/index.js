@@ -34,6 +34,7 @@ export function readConfig(env = process.env) {
     queryTimeout: number('QUERY_TIMEOUT_MS', 5000, 500, 30000), discoveryTimeout: number('DISCOVERY_TIMEOUT_MS', 15000, 1000, 60000),
     discoveryLimit: number('DISCOVERY_LIMIT', 5000, 1, 20000), maxServers: number('MAX_SERVERS', 1000, 1, 5000),
     staleAfter: number('STALE_AFTER_MS', 180000, 10000, 86400000), retention: number('RETENTION_MS', 604800000, 3600000, 2592000000),
+    statsPath: env.STATS_PATH === ':memory:' ? ':memory:' : resolve(env.STATS_PATH || './data/player-stats.sqlite'),
     ratingsPath: resolve(env.RATINGS_PATH || './data/ratings.sqlite'),
     snapshotPath: resolve(env.SNAPSHOT_PATH || './data/snapshot.json'), detectionPath: resolve(env.DETECTION_PATH || './config/detection.json'), geoipPath: env.GEOIP_PATH || '' };
   if (cfg.staleAfter < cfg.liveInterval) throw new Error('STALE_AFTER_MS must be >= LIVE_INTERVAL_MS');

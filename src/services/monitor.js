@@ -6,8 +6,8 @@ import { liveManifestFingerprint, establishManifests, filterMirroredManifests } 
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
 export class Monitor {
-  constructor({ config, rules, discover, query, geoip = () => ({}), store, now = Date.now, log = console }) {
-    Object.assign(this, { config, rules, discover, query, geoip, store, now, log });
+  constructor({ config, rules, discover, query, geoip = () => ({}), store, stats, now = Date.now, log = console }) {
+    Object.assign(this, { config, rules, discover, query, geoip, store, stats, now, log });
     this.servers = new Map(); this.busy = null; this.ready = false; this.stopped = false;
     this.state = { lastDiscoveryAt: null, lastLiveAt: null, discoveryPartial: false, livePartial: false, persistenceError: false, discoveryDisabled: false };
   }
@@ -109,15 +109,25 @@ export class Monitor {
         for (const row of result.servers) this.add(row, this.rules.include.some(s => s.id === row.id));
       } else {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
+        let statsFailed = false;
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
-          return { ...row, ...liveMetadata(raw), a2sFingerprint: a2sFingerprint(raw),
+          const measured = liveMetadata(raw);
+          const playerCount = raw.numplayers ?? raw.players;
+          if (!this.stopped && !statsFailed && Number.isInteger(playerCount) && playerCount >= 0 && playerCount <= 65535) {
+            try { this.stats?.record(row.id, measured.players, this.now()); }
+            catch { statsFailed = true; /* Skip remaining writes this batch; retry next live run. */ }
+          }
+          return { ...row, ...measured, a2sFingerprint: a2sFingerprint(raw),
             liveManifestFingerprint: liveManifestFingerprint(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags,
               description: typeof raw.description === 'string' ? raw.description : row.discoveryDescription,
               discoverySources: row.discoverySources }, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
+        if (!this.stopped && !statsFailed) {
+          try { this.stats?.prune(this.now()); } catch { /* Retry cleanup on later live activity. */ }
+        }
         let successes = 0;
         results.forEach((result, i) => {
           if (result.status === 'fulfilled') {

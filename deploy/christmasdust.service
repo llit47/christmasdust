@@ -11,6 +11,7 @@ User=christmasdust
 Group=christmasdust
 WorkingDirectory=/opt/christmasdust/current
 Environment=RATINGS_PATH=/var/lib/christmasdust/ratings.sqlite
+Environment=STATS_PATH=/var/lib/christmasdust/player-stats.sqlite
 EnvironmentFile=/etc/christmasdust/christmasdust.env
 ExecStart=/opt/christmasdust/node/bin/node src/index.js
 Restart=on-failure

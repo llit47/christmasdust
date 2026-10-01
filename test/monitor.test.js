@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConfig, loadDetection } from '../src/config/index.js';
 import { Monitor } from '../src/services/monitor.js';
+import { PlayerStatsStore, SAMPLE_MS } from '../src/storage/player-stats.js';
 import { SnapshotStore } from '../src/storage/snapshot.js';
 import { parseAddress } from '../src/utils/address.js';
 import { steamDiscovery, targetedTerms } from '../src/services/discovery.js';
@@ -567,4 +568,46 @@ test('old theme timestamps expire only none-confidence candidates while active h
   assert.equal(monitor.servers.get(b.id).classification.confidence, 'probable');
   assert.equal(monitor.servers.has(pending.id), false);
   assert.equal(monitor.snapshot().servers.length, 2);
+});
+
+
+test('history records current measured counts only; missing counts and query failures leave gaps', async t => {
+  const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+  const { monitor, advance } = fixture({ stats });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, 0);
+  await monitor.run('live');
+  assert.equal(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=?').get(a.id).players, 12);
+  advance(1800000); monitor.query = async () => ({ name: 'Xmas online' }); await monitor.run('live');
+  assert.equal(monitor.servers.get(a.id).players, 12);
+  advance(1800000); monitor.query = async () => { throw Error('timeout'); }; await monitor.run('live');
+  assert.equal(monitor.servers.get(a.id).players, 12);
+  advance(SAMPLE_MS); monitor.query = async () => ({ numplayers: 0 }); await monitor.run('live');
+  assert.equal(monitor.servers.get(a.id).players, 0);
+  assert.deepEqual(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=? ORDER BY bucket_at').all(a.id).map(row => row.players), [12, 0]);
+  assert.equal(stats.history([a.id], monitor.now()).histories[a.id][46], null);
+});
+
+test('history write and cleanup failures preserve monitoring, snapshot data and visibility', async () => {
+  const normal = fixture().monitor;
+  const broken = fixture({ stats: { record() { throw Error('SQLite unavailable'); }, prune() { throw Error('SQLite unavailable'); } } }).monitor;
+  for (const monitor of [normal, broken]) { await monitor.init(); await monitor.run('discovery'); await monitor.run('live'); }
+  assert.deepEqual(broken.snapshot(), normal.snapshot());
+});
+
+test('removed endpoints stop querying and rediscovery continues their persistent history', async t => {
+  const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+  let calls = 0;
+  const { monitor, advance } = fixture({ stats, discover: async () => ({ servers: [a], successfulRequests: 1 }),
+    query: async () => { calls++; return { numplayers: calls * 3 }; } });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  advance(monitor.config.retention + 1); monitor.prune();
+  assert.equal(monitor.servers.size, 0);
+  await monitor.run('live'); assert.equal(calls, 1);
+  // Expired samples may be pruned, so model a short disappearance via existing exclusion.
+  await monitor.run('discovery'); await monitor.run('live');
+  monitor.rules = { ...rules, exclude: new Set([a.id]) }; monitor.prune();
+  advance(SAMPLE_MS); await monitor.run('live'); assert.equal(calls, 2);
+  monitor.rules = rules; await monitor.run('discovery'); await monitor.run('live'); assert.equal(calls, 3);
+  assert.deepEqual(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=? ORDER BY bucket_at').all(a.id).map(row => row.players), [6, 9]);
 });
