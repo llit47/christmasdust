@@ -280,3 +280,83 @@ test('pending master candidates are capped without blocking Web API candidates',
   await monitor.run('live'); assert.equal(queries, 129);
   assert.deepEqual(monitor.snapshot().servers.map(row => row.id), [second.id]);
 });
+
+async function pendingFixture(ids = [first.id], { saved = null, time = 1000000 } = {}) {
+  let candidates = ids; let persisted;
+  const discover = combinedDiscovery(config, rules, {
+    master: async () => result(candidates.map(id => ({ ...parseAddress(id), discoverySources: ['master:regional'] })))
+  });
+  const monitor = new Monitor({ config, rules, discover, now: () => time, log: { warn() {} },
+    query: async () => { throw Error('live timeout'); },
+    store: { load: async () => saved, save: async value => { persisted = value; } } });
+  await monitor.init(); await monitor.run('discovery');
+  return { monitor, persisted: () => persisted, rotate: ids => { candidates = ids; } };
+}
+
+test('never-verified master-only pending candidates expire after three consecutive live failures', async () => {
+  const { monitor, persisted } = await pendingFixture();
+  for (let failures = 1; failures <= 2; failures++) {
+    await monitor.run('live');
+    assert.equal(monitor.servers.get(first.id).misses, failures);
+    assert.equal(monitor.servers.get(first.id).lastSeenAt, null);
+  }
+  // Rediscovery must not reset the consecutive failure count.
+  await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(monitor.servers.size, 0); assert.equal(persisted().servers.length, 0);
+  assert.equal(monitor.snapshot().meta.livePartial, true);
+});
+
+test('expired pending slots admit later rotated master candidates', async () => {
+  const ids = Array.from({ length: 128 }, (_, index) => `8.8.8.8:${27015 + index}`);
+  const { monitor, rotate } = await pendingFixture(ids);
+  assert.equal(monitor.servers.size, 128);
+  rotate([second.id]); await monitor.run('discovery');
+  assert.equal(monitor.servers.has(second.id), false);
+  for (let failures = 0; failures < 3; failures++) await monitor.run('live');
+  assert.equal(monitor.servers.size, 0);
+  await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 1); assert.equal(monitor.servers.has(second.id), true);
+  assert.equal(monitor.servers.get(second.id).classification.confidence, 'none');
+  assert.equal(monitor.servers.get(second.id).misses, 0);
+});
+
+test('a previously live-verified endpoint retains last-good data after failures, including across restore', async () => {
+  const fixture = await pendingFixture([first.id], { time: 0 });
+  const monitor = fixture.monitor;
+  monitor.query = async () => ({ name: 'Christmas Verified', map: 'de_xmas', numplayers: 12, maxplayers: 32 });
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(first.id).classification.confidence, 'high');
+  // A complete theme change hides it after one observation, but it has been live-verified.
+  monitor.query = async () => ({ name: 'Public', map: 'de_dust2', numplayers: 5, maxplayers: 32 });
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(first.id).classification.confidence, 'none');
+  const restored = await pendingFixture([first.id], { saved: fixture.persisted(), time: 0 });
+  for (let failures = 0; failures < 4; failures++) await restored.monitor.run('live');
+  const row = restored.monitor.servers.get(first.id);
+  assert.ok(row); assert.equal(row.lastSeenAt, 0);
+  assert.equal(row.status, 'offline'); assert.equal(row.misses, 4);
+  assert.equal(row.name, 'Public'); assert.equal(row.map, 'de_dust2');
+  assert.equal(row.players, 5); assert.equal(row.maxPlayers, 32);
+  assert.equal(restored.persisted().servers.length, 1);
+});
+
+test('a successful non-seasonal pending response resets failures and follows existing theme retirement', async () => {
+  const { monitor } = await pendingFixture();
+  await monitor.run('live'); await monitor.run('live');
+  monitor.query = async () => ({ name: 'Public', map: 'fy_snow', numplayers: 3, maxplayers: 32 });
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(first.id).misses, 0);
+  assert.equal(monitor.servers.get(first.id).lastSeenAt, 1000000);
+  assert.equal(monitor.servers.get(first.id).themeMisses, 1);
+  assert.equal(monitor.snapshot().servers.length, 0);
+  await monitor.run('live');
+  assert.equal(monitor.servers.has(first.id), false);
+});
+
+test('pending endpoints also seen by Web API keep normal failure retention', async () => {
+  const { monitor } = await pendingFixture();
+  monitor.add({ ...first, discoverySources: ['web-api', 'regional'] });
+  for (let failures = 0; failures < 4; failures++) await monitor.run('live');
+  assert.equal(monitor.servers.get(first.id).misses, 4);
+  assert.equal(monitor.servers.get(first.id).lastSeenAt, null);
+});

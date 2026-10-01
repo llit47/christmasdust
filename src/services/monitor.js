@@ -118,7 +118,12 @@ export class Monitor {
           }
           else {
             const row = rows[i]; const misses = (row.misses || 0) + 1;
-            this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
+            // Recycle unreachable master-only pending slots; any successful live response protects last-good data.
+            if (misses >= 3 && row.lastSeenAt == null && row.classification.confidence === 'none' &&
+              !row.curated && Array.isArray(row.discoverySources) && row.discoverySources.includes('master-udp') &&
+              row.discoverySources.every(source => typeof source === 'string' && (source === 'master-udp' || source.startsWith('master:'))))
+              this.servers.delete(row.id);
+            else this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
           }
         });
         establishManifests([...this.servers.values()], new Set(results.flatMap((result, i) =>
