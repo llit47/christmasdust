@@ -20,7 +20,7 @@ async function main() {
   const app = createApp({ config, monitor, geoip, ratings, stats });
   const server = app.listen(config.port, config.host, () => {
     console.info(`ChristmasDust listening on ${config.host}:${config.port}`);
-    if (!config.steamKey && config.discoveryMode !== 'seeds') console.warn('Steam Web API unavailable: configure STEAM_API_KEY; using master discovery and configured seeds');
+    if (!config.steamKey && config.discoveryMode !== 'seeds') console.warn('Steam Web API unavailable: configure STEAM_API_KEY; using configured seeds');
     monitor.start();
   });
   server.requestTimeout = 15000; server.headersTimeout = 10000;

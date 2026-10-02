@@ -688,7 +688,7 @@ test('coverage diagnostics whitelist bounded source counts and distinguish query
   });
   await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
   const coverage = monitor.snapshot().meta.coverage;
-  assert.deepEqual(coverage.discovery, { steamEndpoints: 2, masterRegionalEndpoints: 1, masterMapEndpoints: 1,
+  assert.deepEqual(coverage.discovery, { steamEndpoints: 2,
     candidatesRetained: 3, candidatesDropped: 0 });
   assert.deepEqual(coverage.live, { queriedEndpoints: 3, queryFailures: 1, classificationNone: 1 });
   assert.deepEqual(coverage.visibility, { monitoredEndpoints: 3, classificationNone: 1, capacityHidden: 1,
@@ -699,6 +699,5 @@ test('coverage diagnostics whitelist bounded source counts and distinguish query
     steamEndpoints: Infinity, masterRegionalEndpoints: -100, masterMapEndpoints: 100000000, secret: 'not public'
   } });
   await monitor.run('discovery');
-  assert.deepEqual(monitor.snapshot().meta.coverage.discovery, { steamEndpoints: 0, masterRegionalEndpoints: 0,
-    masterMapEndpoints: 1000000, candidatesRetained: 0, candidatesDropped: 0 });
+  assert.deepEqual(monitor.snapshot().meta.coverage.discovery, { steamEndpoints: 0, candidatesRetained: 0, candidatesDropped: 0 });
 });

@@ -15,6 +15,15 @@ const first = parseAddress('8.8.8.8:27015');
 const second = parseAddress('1.1.1.1:27015');
 const filter = '\\appid\\10\\gamedir\\cstrike';
 const result = (servers, overrides = {}) => ({ servers, successfulRequests: 1, partial: false, disabled: false, attempted: true, ...overrides });
+// An explicit test harness for legacy Master records; production never calls this.
+function legacyDiscovery(master, web = async () => result([])) {
+  return async () => {
+    const source = await master();
+    const steam = await web();
+    return { ...source, servers: [...steam.servers, ...source.servers.map(row => ({ ...parseAddress(row.id),
+      candidateOnly: true, discoverySources: [...(row.discoverySources || []), 'master-udp'] }))] };
+  };
+}
 const resolve = async (host, options) => {
   assert.equal(host, 'hl2master.steampowered.com'); assert.deepEqual(options, { family: 4 });
   return { address: masterIp };
@@ -173,9 +182,7 @@ test('normal sampling, including an entirely skipped budget, does not degrade th
     instances++;
     return queryMaster(input, () => socket(current => reply(current, packet([]))), pace, clock);
   } });
-  const discover = combinedDiscovery(config, rules, {
-    master, web: async () => result([], { disabled: true, successfulRequests: 0 })
-  });
+  const discover = legacyDiscovery(master);
   const monitor = new Monitor({ config, rules, discover, now: clock.now, log: { warn() {} },
     store: { load: async () => null, save: async () => {} } });
   await monitor.init();
@@ -293,27 +300,6 @@ test('master adapter caps total endpoints, strips metadata, preserves provenance
   assert.equal(disabled.disabled, true); assert.equal(disabled.servers.length, 0);
 });
 
-test('combined discovery merges endpoints once without replacing Web API metadata or losing provenance', async () => {
-  const web = async () => result([{ ...first, name: 'Christmas Web', map: 'de_dust2_xmas', discoverySources: ['regional'] }]);
-  let master = () => result([{ ...first, name: 'Spoof', map: 'fy_snow', discoverySources: ['master:regional'] },
-    { ...second, name: 'Spoof Xmas', map: 'de_christmas', discoverySources: ['master:map:de_christmas'] }]);
-  const discover = combinedDiscovery(config, rules, { web, master: () => master() });
-  const found = await discover();
-  assert.equal(found.servers.length, 2);
-  const webRow = found.servers.find(row => row.id === first.id);
-  const masterRow = found.servers.find(row => row.id === second.id);
-  assert.equal(webRow.name, 'Christmas Web'); assert.equal(webRow.candidateOnly, false);
-  assert.deepEqual(webRow.discoverySources, ['regional', 'web-api', 'master:regional', 'master-udp']);
-  assert.equal(masterRow.name, undefined); assert.equal(masterRow.candidateOnly, true);
-  assert.ok(masterRow.discoverySources.includes('master-udp'));
-  assert.deepEqual(found.coverage, { steamEndpoints: 1, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
-  for (const failed of [() => { throw Error('UDP timeout'); }, () => result([], { partial: true, successfulRequests: 0 })]) {
-    master = failed; const remaining = await discover();
-    assert.equal(remaining.partial, true); assert.equal(remaining.servers.length, 1);
-    assert.equal(remaining.servers[0].name, 'Christmas Web'); assert.equal(remaining.successfulRequests, 1);
-  }
-});
-
 test('master-only endpoints enter monitoring but must pass live classification and all public filters', async () => {
   const ids = [first.id, second.id, '9.9.9.9:27015', '4.2.2.2:27015', '208.67.222.222:27015',
     '8.8.4.4:27015', '208.67.220.220:27015', '1.0.0.1:27015', '13.107.21.200:27015'];
@@ -326,7 +312,7 @@ test('master-only endpoints enter monitoring but must pass live classification a
     ...(ids.slice(6, 8).includes(row.id) ? { name: 'Christmas Alias', numplayers: row.id === ids[6] ? 2 : 5,
       serverIdentity: '90123456789012345' } : {}) });
   const master = masterDiscovery(config, rules, { resolve, query: async () => result(ids.map(parseAddress)) });
-  const discover = combinedDiscovery(config, rules, { master });
+  const discover = legacyDiscovery(master);
   const monitor = new Monitor({ config, rules: { ...rules, exclude: new Set([excluded]) }, discover,
     query: async () => { throw Error('live timeout'); }, now: () => 1000000, log: { warn() {} },
     store: { load: async () => null, save: async value => { persisted = value; } } });
@@ -358,10 +344,10 @@ test('master-only endpoints enter monitoring but must pass live classification a
 
 test('pending master candidates are capped without blocking Web API candidates', async () => {
   const candidates = Array.from({ length: 150 }, (_, index) => parseAddress(`8.8.8.8:${27015 + index}`));
-  const discover = combinedDiscovery(config, rules, {
-    web: async () => result([{ ...second, name: 'Christmas Web', map: 'de_xmas', discoverySources: ['regional'] }]),
-    master: async () => result(candidates.map(row => ({ ...row, discoverySources: ['master:regional'] })))
-  });
+  const discover = legacyDiscovery(
+    async () => result(candidates.map(row => ({ ...row, discoverySources: ['master:regional'] }))),
+    async () => result([{ ...second, name: 'Christmas Web', map: 'de_xmas', discoverySources: ['regional'] }])
+  );
   let queries = 0;
   const monitor = new Monitor({ config, rules, discover, now: () => 1000000, log: { warn() {} },
     query: async row => { queries++; return { name: row.id === second.id ? 'Christmas Web' : 'Public', map: 'fy_snow' }; },
@@ -375,9 +361,9 @@ test('pending master candidates are capped without blocking Web API candidates',
 
 async function pendingFixture(ids = [first.id], { saved = null, time = 1000000 } = {}) {
   let candidates = ids; let persisted;
-  const discover = combinedDiscovery(config, rules, {
-    master: async () => result(candidates.map(id => ({ ...parseAddress(id), discoverySources: ['master:regional'] })))
-  });
+  const discover = legacyDiscovery(
+    async () => result(candidates.map(id => ({ ...parseAddress(id), discoverySources: ['master:regional'] })))
+  );
   const monitor = new Monitor({ config, rules, discover, now: () => time, log: { warn() {} },
     query: async () => { throw Error('live timeout'); },
     store: { load: async () => saved, save: async value => { persisted = value; } } });
@@ -531,16 +517,17 @@ test('timed-out or budget-skipped pagination retains successfully consumed curso
 test('targeted Web candidates share the bounded pending pool, reach live queries and expire after failures', async () => {
   const ids = Array.from({ length: 150 }, (_, index) => `8.8.8.8:${28000 + index}`);
   const discover = combinedDiscovery(config, rules, {
-    web: async () => result(ids.map(id => ({ ...parseAddress(id), name: 'Winter Public', map: 'de_dust2',
+    web: async () => result(ids.map(id => ({ ...parseAddress(id), name: `Winter Public ${id}`, map: 'de_dust2',
       discoverySources: ['name:winter'] }))),
     master: async () => result([{ ...second, discoverySources: ['master:regional'] }])
   });
   const monitor = new Monitor({ config, rules, discover, now: () => 1000000, log: { warn() {} },
-    query: async row => ({ name: 'Winter Public', map: row.id === ids[0] ? 'de_dust2_winter' : 'de_dust2', maxplayers: 32 }),
+    query: async row => ({ name: 'Winter Public', map: row.id === ids[0] ? 'de_dust2_winter' : 'de_dust2',
+      ...(row.id === ids[0] ? {} : { name: 'Public' }), maxplayers: 32 }),
     store: { load: async () => null, save: async () => {} } });
   await monitor.init(); await monitor.run('discovery');
   assert.equal(monitor.servers.size, 128);
-  assert.equal(monitor.servers.has(second.id), false); // Targeted samples receive admission before broad samples.
+  assert.equal(monitor.servers.has(second.id), false); // Legacy Master is absent from runtime discovery.
   assert.equal(monitor.snapshot().servers.length, 0);
   await monitor.run('live');
   assert.deepEqual(monitor.snapshot().servers.map(row => row.id), [ids[0]]);
@@ -567,68 +554,13 @@ test('large regional samples share pending admission instead of always favoring 
     Array.from({ length: 128 }, (_, index) => parseAddress(`8.8.8.${input.region + 1}:${28000 + index}`)),
     { cursor: `8.8.8.${input.region + 1}:28127` }
   ) });
-  const discover = combinedDiscovery(config, rules, { master,
-    web: async () => result([], { disabled: true, successfulRequests: 0 }) });
+  const discover = legacyDiscovery(master);
   const monitor = new Monitor({ config, rules, discover, now: () => 1000000, log: { warn() {} },
     store: { load: async () => null, save: async () => {} } });
   await monitor.init(); await monitor.run('discovery');
   assert.equal(monitor.servers.size, 128);
   for (let region = 0; region < 4; region++)
     assert.equal([...monitor.servers.values()].filter(row => row.ip === `8.8.8.${region + 1}`).length, 32);
-  assert.equal(monitor.snapshot().meta.coverage.discovery.masterRegionalEndpoints, 512);
+  assert.equal('masterRegionalEndpoints' in monitor.snapshot().meta.coverage.discovery, false);
   assert.equal(monitor.snapshot().meta.coverage.discovery.candidatesDropped, 384);
 });
-
-for (const failedSource of ['web', 'master']) {
-  test(`${failedSource} coverage survives adapter failures while the other source updates, then recovers to a real zero`, async () => {
-    for (const failure of ['throw', 'reject', 'unavailable']) {
-      let failing = false, recovering = false, emptyHealthy = false, latest;
-      const fail = () => {
-        if (failure === 'throw') throw Error('adapter threw');
-        if (failure === 'reject') return Promise.reject(Error('adapter rejected'));
-        return result([], { partial: true, successfulRequests: 0 });
-      };
-      const web = () => {
-        if (failing && failedSource === 'web') return fail();
-        return result(recovering || emptyHealthy ? [] : [first, ...(failing ? [second] : [])]);
-      };
-      const master = () => {
-        if (failing && failedSource === 'master') return fail();
-        return result(recovering || emptyHealthy ? [] : [
-          { ...first, discoverySources: ['master:regional', 'master:map:de_christmas'] },
-          ...(failing ? [{ ...second, discoverySources: ['master:regional', 'master:map:de_christmas'] }] : [])
-        ]);
-      };
-      const combined = combinedDiscovery(config, rules, { web, master });
-      const monitor = new Monitor({ config, rules, discover: async () => { latest = await combined(); return latest; },
-        now: () => 1000000, log: { warn() {} }, store: { load: async () => null, save: async () => {} } });
-      const counts = () => {
-        const { steamEndpoints, masterRegionalEndpoints, masterMapEndpoints } = monitor.snapshot().meta.coverage.discovery;
-        return { steamEndpoints, masterRegionalEndpoints, masterMapEndpoints };
-      };
-      await monitor.init(); await monitor.run('discovery');
-      assert.deepEqual(counts(), { steamEndpoints: 1, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
-      assert.equal(monitor.snapshot().meta.discoveryPartial, false);
-
-      failing = true; await monitor.run('discovery');
-      assert.equal(monitor.snapshot().meta.discoveryPartial, true);
-      if (failedSource === 'web') {
-        assert.deepEqual(latest.coverage, { masterRegionalEndpoints: 2, masterMapEndpoints: 2 });
-        assert.deepEqual(counts(), { steamEndpoints: 1, masterRegionalEndpoints: 2, masterMapEndpoints: 2 });
-      } else {
-        assert.deepEqual(latest.coverage, { steamEndpoints: 2 });
-        assert.deepEqual(counts(), { steamEndpoints: 2, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
-      }
-
-      emptyHealthy = true; await monitor.run('discovery');
-      assert.equal(monitor.snapshot().meta.discoveryPartial, true);
-      assert.deepEqual(counts(), failedSource === 'web' ?
-        { steamEndpoints: 1, masterRegionalEndpoints: 0, masterMapEndpoints: 0 } :
-        { steamEndpoints: 0, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
-
-      failing = false; recovering = true; await monitor.run('discovery');
-      assert.deepEqual(counts(), { steamEndpoints: 0, masterRegionalEndpoints: 0, masterMapEndpoints: 0 });
-      assert.equal(monitor.snapshot().meta.discoveryPartial, false);
-    }
-  });
-}

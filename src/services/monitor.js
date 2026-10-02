@@ -1,4 +1,4 @@
-import { filterSameNameMirrors } from '../domain/name-mirrors.js';
+import { filterSameNameMirrors, normalizedName } from '../domain/name-mirrors.js';
 import { classify } from '../domain/classify.js';
 import { metadata, liveMetadata, cleanText } from '../domain/server.js';
 import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
@@ -11,7 +11,7 @@ export class Monitor {
     this.servers = new Map(); this.busy = null; this.ready = false; this.stopped = false;
     this.state = { lastDiscoveryAt: null, lastLiveAt: null, discoveryPartial: false, livePartial: false, persistenceError: false, discoveryDisabled: false };
     this.coverage = {
-      discovery: { steamEndpoints: 0, masterRegionalEndpoints: 0, masterMapEndpoints: 0, candidatesRetained: 0, candidatesDropped: 0 },
+      discovery: { steamEndpoints: 0, candidatesRetained: 0, candidatesDropped: 0 },
       live: { queriedEndpoints: 0, queryFailures: 0, classificationNone: 0 }
     };
   }
@@ -23,8 +23,9 @@ export class Monitor {
         for (const row of saved.servers) {
           if (this.rules.exclude.has(row.id)) continue;
           if (row.classification?.confidence === 'none') { this.servers.set(row.id, { ...row, ...this.geoip(row.ip) }); continue; }
-          const classification = classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription,
-            discoverySources: row.discoverySources }, this.rules, row.curated);
+          const classification = this.classification({ ...row, tags: row.discoveryTags, description: row.discoveryDescription,
+            discoverySources: row.discoverySources }, row.curated, row.lastSeenAt != null &&
+              row.classification?.signals?.some(signal => signal.kind === 'live-verified-winter-name'));
           // Apply updated relevance rules to complete restored metadata immediately.
           if (classification.confidence === 'none' && cleanText(row.name).trim() && cleanText(row.map).trim()) continue;
           this.servers.set(row.id, { ...row, ...this.geoip(row.ip), classification: classification.confidence === 'none' ? row.classification : classification });
@@ -36,11 +37,24 @@ export class Monitor {
     this.prune();
     this.ready = true;
   }
-  themeObservation(raw, previous, curated) {
+  classification(raw, curated, liveVerified = false) {
+    const classification = classify(raw, this.rules, curated);
+    const name = normalizedName(raw.name);
+    if (classification.confidence === 'none' && liveVerified && raw.discoverySources?.includes('name:winter') &&
+      ` ${name} `.includes(' winter ') && !['no', 'not', 'non', 'without', 'anti'].some(word =>
+        ` ${name} `.includes(` ${word} winter `))) {
+      const reason = 'name: live-verified targeted winter identity';
+      return { ...classification, confidence: 'probable',
+        signals: [...classification.signals, { field: 'name', kind: 'live-verified-winter-name', term: 'winter', points: 0, reason }],
+        reasons: [...classification.reasons, reason] };
+    }
+    return classification;
+  }
+  themeObservation(raw, previous, curated, liveVerified = false) {
     // An omitted map retains both the last-good metadata and its strong map evidence.
     const retainStrongMap = !cleanText(raw.map).trim() && previous?.classification?.signals?.some(signal =>
       signal.field === 'map' && signal.points > 0 && ['known-strong-map', 'explicit'].includes(signal.kind));
-    const classification = classify({ ...raw, map: retainStrongMap ? previous.map : raw.map }, this.rules, curated);
+    const classification = this.classification({ ...raw, map: retainStrongMap ? previous.map : raw.map }, curated, liveVerified);
     if (classification.confidence !== 'none') {
       const observedTheme = curated || !retainStrongMap || classification.signals.some(signal =>
         ['name', 'tags', 'description'].includes(signal.field) && signal.points > 0);
@@ -66,14 +80,24 @@ export class Monitor {
     const discoveryDescription = typeof raw.description === 'string' ? cleanText(raw.description) : previous?.discoveryDescription;
     const discoverySources = Array.isArray(raw.discoverySources) ?
       [...new Set([...(previous?.discoverySources || []), ...raw.discoverySources])] : previous?.discoverySources;
-    const { retire, ...theme } = this.themeObservation({ ...raw, tags: discoveryTags, description: discoveryDescription,
-      discoverySources }, previous, curated);
+    // Discovery cannot re-verify winter identity or overwrite its last live observation.
+    const verifiedWinter = previous?.lastSeenAt != null && previous.classification?.signals?.some(signal =>
+      signal.kind === 'live-verified-winter-name');
+    const { retire, ...theme } = this.themeObservation({ ...raw,
+      ...(verifiedWinter ? { name: previous.name, map: previous.map } : {}), tags: discoveryTags, description: discoveryDescription,
+      discoverySources }, previous, curated, verifiedWinter);
     if (retire) {
       if (!previous && raw.candidateOnly === true) Object.assign(theme, { classification: classify({}, this.rules), themeMisses: 0 });
       else { this.servers.delete(address.id); return; }
     }
+    // Bound new winter-only mirrors across discovery cycles and live promotion.
+    // Existing, independently relevant and operator-included rows bypass admission caps.
+    if (!previous && !curated && theme.classification.confidence === 'none' && discoverySources?.includes('name:winter')) {
+      const name = normalizedName(raw.name);
+      if ([...this.servers.values()].filter(row => normalizedName(row.name) === name).length >= 2) return;
+    }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
-    // Endpoint-only master and targeted Web samples share one bounded pending pool.
+    // Targeted samples and compatible legacy snapshots share one bounded pending pool.
     if (!previous && !curated && raw.candidateOnly === true && theme.classification.confidence === 'none' &&
       [...this.servers.values()].filter(row => row.classification.confidence === 'none').length >= 128) {
       this.state.discoveryPartial = true; return;
@@ -111,13 +135,20 @@ export class Monitor {
         this.state.discoveryPartial = result.partial || (!result.disabled && !result.successfulRequests && !result.samplingSkipped);
         if (result.successfulRequests) this.state.lastDiscoveryAt = this.now();
         const counters = this.coverage.discovery;
-        for (const field of ['steamEndpoints', 'masterRegionalEndpoints', 'masterMapEndpoints']) {
+        for (const field of ['steamEndpoints']) {
           const value = result.coverage?.[field];
           if (value === undefined) continue;
           counters[field] = Number.isSafeInteger(value) ? Math.max(0, Math.min(1000000, value)) : 0;
         }
         counters.candidatesRetained = 0; counters.candidatesDropped = 0;
-        for (const row of result.servers) this.add(row, this.rules.include.some(s => s.id === row.id));
+        const included = new Set(this.rules.include.map(row => row.id));
+        const priority = row => classify(row, this.rules, included.has(row.id)).confidence !== 'none' ? 0 :
+          row.discoverySources?.some(source => typeof source === 'string' &&
+            (source.startsWith('name:') || source.startsWith('map:') || source.startsWith('master:map:'))) ? 1 : 2;
+        // Decide before any admission consumes MAX_SERVERS or the shared pending pool.
+        const candidates = result.servers.map(row => ({ row, priority: priority(row) }))
+          .sort((a, b) => a.priority - b.priority);
+        for (const { row } of candidates) this.add(row, included.has(row.id));
         for (const row of result.servers) {
           if (this.servers.has(row.id)) counters.candidatesRetained++;
           else counters.candidatesDropped++;
@@ -135,7 +166,7 @@ export class Monitor {
             liveManifestFingerprint: liveManifestFingerprint(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags,
               description: typeof raw.description === 'string' ? raw.description : row.discoveryDescription,
-              discoverySources: row.discoverySources }, row, row.curated),
+              discoverySources: row.discoverySources }, row, row.curated, true),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
         if (!this.stopped) {
