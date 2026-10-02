@@ -18,7 +18,7 @@ sudo christmasdust update v0.1.0    # once that tag exists
 | Group | Counters | Meaning |
 | --- | --- | --- |
 | `discovery` | `steamEndpoints` | Unique validated endpoints returned by Steam Web API in its latest observed pass, including useful partial responses. Legacy Master counters are removed because Master UDP no longer runs. |
-| `discovery` | `candidatesRetained`, `candidatesDropped` | Returned Steam candidates still in monitoring after admission/classification/exclusion checks, or dropped before live querying. Previously retained endpoints count as retained; these are not just new arrivals. |
+| `discovery` | `candidatesRetained`, `candidatesDropped` | Returned Steam candidates still in monitoring after admission/classification/exclusion checks, or dropped before live querying. Previously retained endpoints count as retained; these are not just new arrivals. Pending rows evicted for relevant arrivals count as dropped only if also returned in the current response; evictions absent from that response do not inflate these counters. |
 | `live` | `queriedEndpoints`, `queryFailures`, `classificationNone` | Endpoints attempted in the latest live batch (including scoped batches), failed queries, and successful responses left hidden/rejected with `none` classification. Failures are separate from non-matching responses. |
 | `visibility` | `monitoredEndpoints`, `classificationNone`, `capacityHidden`, `manifestSuppressed`, `nameMirrorSuppressed`, `duplicateAliases`, `publicServers` | Current pipeline counts: monitored, non-matching, oversized, removed by each mirror filter, grouped identity aliases and public representatives. Filters apply sequentially; don't add suppressed counts to source-return counts. |
 

@@ -96,7 +96,21 @@ export class Monitor {
       const name = normalizedName(raw.name);
       if ([...this.servers.values()].filter(row => normalizedName(row.name) === name).length >= 2) return;
     }
-    if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
+    if (!previous && !curated && this.servers.size >= this.config.maxServers) {
+      // Relevant arrivals may displace never-verified pending discovery rows from
+      // earlier cycles. Includes, classified rows and all last-good live data stay.
+      const included = new Set(this.rules.include.map(row => row.id));
+      const pending = theme.classification.confidence !== 'none' && this.servers.size === this.config.maxServers ?
+        [...this.servers.values()].filter(row => !row.curated && !included.has(row.id) &&
+          row.classification.confidence === 'none' && row.lastSeenAt == null &&
+          row.discoverySources?.some(source => typeof source === 'string' &&
+            (source.startsWith('name:') || source.startsWith('map:') || source === 'master-udp')))
+          .sort((a, b) => (a.discoveredAt ?? 0) - (b.discoveredAt ?? 0) ||
+            (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0] : null;
+      // Do not discard data if curated overflow prevents one eviction from making room.
+      if (!pending) { this.state.discoveryPartial = true; return; }
+      this.servers.delete(pending.id);
+    }
     // Targeted samples and compatible legacy snapshots share one bounded pending pool.
     if (!previous && !curated && raw.candidateOnly === true && theme.classification.confidence === 'none' &&
       [...this.servers.values()].filter(row => row.classification.confidence === 'none').length >= 128) {

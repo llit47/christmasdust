@@ -20,14 +20,15 @@ const farm = (start = 0, length = 300) => Array.from({ length }, (_, index) => (
     'ϟ Ludnica Jailbreak [WINTER UPDATE]', map: 'de_dust2', discoverySources: ['name:winter']
 }));
 function fixture(servers, { maxServers = 1000, saved = null, include = [], query } = {}) {
-  let candidates = servers, persisted;
+  let candidates = servers, persisted, time = 1000000;
   const config = readConfig({ MAX_SERVERS: String(maxServers), STEAM_API_KEY: 'a'.repeat(32) });
   const discover = combinedDiscovery(config, rules, { web: async () => response(candidates) });
   const monitor = new Monitor({ config, rules: { ...rules, include }, discover,
     query: query ?? (async row => ({ name: row.name, map: row.map, maxplayers: row.maxPlayers || 32 })),
-    now: () => 1000000, log: { warn() {} },
+    now: () => time, log: { warn() {} },
     store: { load: async () => saved, save: async value => { persisted = value; } } });
-  return { monitor, rotate: rows => { candidates = rows; }, persisted: () => persisted };
+  return { monitor, rotate: rows => { candidates = rows; }, persisted: () => persisted,
+    advance: ms => { time += ms; } };
 }
 
 for (const candidate of [reference, vibe]) {
@@ -213,3 +214,124 @@ for (const failure of ['throw', 'reject', 'unavailable']) {
     assert.ok(monitor.servers.has(christmas.id));
   });
 }
+
+test('issue #26 across cycles: a Christmas arrival replaces one pending winter row at MAX_SERVERS=2', async () => {
+  const { monitor, rotate, persisted } = fixture([reference, vibe], { maxServers: 2 });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 2);
+  assert.ok([...monitor.servers.values()].every(row => row.classification.confidence === 'none' && row.lastSeenAt === null));
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 2, candidatesRetained: 2, candidatesDropped: 0 });
+  rotate([christmas]); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 2);
+  assert.equal(monitor.servers.get(christmas.id).classification.confidence, 'high');
+  assert.equal(monitor.servers.has(reference.id), false);
+  assert.equal(monitor.servers.has(vibe.id), true);
+  assert.equal(monitor.state.discoveryPartial, false);
+  // Admission counters describe this response, not evictions absent from it.
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 1, candidatesDropped: 0 });
+  assert.deepEqual(persisted().servers.map(row => row.id), [vibe.id, christmas.id]);
+});
+
+for (const older of ['age', 'endpoint tie-break']) {
+  test(`pending eviction deterministically chooses by ${older} rather than insertion order`, async () => {
+    const { monitor, rotate, advance } = fixture(older === 'age' ? [vibe] : [vibe, reference], { maxServers: 2 });
+    await monitor.init(); await monitor.run('discovery');
+    if (older === 'age') {
+      advance(1000); rotate([reference]); await monitor.run('discovery');
+    }
+    assert.equal(monitor.servers.size, 2);
+    rotate([christmas]); await monitor.run('discovery');
+    const evicted = older === 'age' ? vibe : reference;
+    const retained = older === 'age' ? reference : vibe;
+    assert.equal(monitor.servers.has(evicted.id), false);
+    assert.ok(monitor.servers.has(retained.id)); assert.ok(monitor.servers.has(christmas.id));
+    assert.equal(monitor.servers.size, 2);
+  });
+}
+
+test('curated/operator-included rows stay while a pending row is evicted', async () => {
+  const { monitor, rotate } = fixture([reference, vibe], { maxServers: 2, include: [reference] });
+  await monitor.init(); await monitor.run('discovery');
+  const included = monitor.servers.get(reference.id);
+  assert.equal(included.classification.confidence, 'curated');
+  rotate([christmas]); await monitor.run('discovery');
+  assert.strictEqual(monitor.servers.get(reference.id), included);
+  assert.equal(monitor.servers.has(vibe.id), false); assert.ok(monitor.servers.has(christmas.id));
+  assert.equal(monitor.servers.size, 2);
+});
+
+test('operator includes remain protected even when persisted flags do not identify them as curated', async () => {
+  const { monitor, rotate } = fixture([reference, vibe], { maxServers: 2, include: [reference] });
+  await monitor.init(); await monitor.run('discovery');
+  const included = monitor.servers.get(reference.id);
+  included.curated = false; included.classification = classify(reference, rules);
+  rotate([christmas]); await monitor.run('discovery');
+  assert.strictEqual(monitor.servers.get(reference.id), included);
+  assert.equal(monitor.servers.has(vibe.id), false); assert.ok(monitor.servers.has(christmas.id));
+  assert.equal(monitor.servers.size, 2);
+});
+
+for (const confidence of ['high', 'probable']) {
+  test(`existing ${confidence} live rows are protected while a pending row is evicted`, async () => {
+    const existing = confidence === 'high' ? { ...reference, name: 'Xmas Existing' } : reference;
+    const { monitor, rotate } = fixture([existing, vibe], { maxServers: 2 });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live', [existing.id]);
+    const retained = monitor.servers.get(existing.id);
+    assert.equal(retained.classification.confidence, confidence);
+    rotate([christmas]); await monitor.run('discovery');
+    assert.strictEqual(monitor.servers.get(existing.id), retained);
+    assert.equal(monitor.servers.has(vibe.id), false); assert.ok(monitor.servers.has(christmas.id));
+    assert.equal(monitor.servers.size, 2);
+  });
+}
+
+test('full classified capacity rejects arrivals without evicting existing high or probable rows', async () => {
+  const existingHigh = { ...vibe, name: 'Christmas Existing' };
+  const { monitor, rotate } = fixture([reference, existingHigh], { maxServers: 2 });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live', [reference.id]);
+  const prior = new Map(monitor.servers);
+  assert.equal(prior.get(reference.id).classification.confidence, 'probable');
+  assert.equal(prior.get(existingHigh.id).classification.confidence, 'high');
+  rotate([christmas]); await monitor.run('discovery');
+  assert.deepEqual(monitor.servers, prior); assert.equal(monitor.servers.has(christmas.id), false);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+});
+
+test('full curated capacity rejects arrivals without evicting includes', async () => {
+  const { monitor, rotate } = fixture([], { maxServers: 2, include: [reference, vibe] });
+  await monitor.init();
+  const prior = new Map(monitor.servers);
+  rotate([christmas]); await monitor.run('discovery');
+  assert.deepEqual(monitor.servers, prior); assert.equal(monitor.servers.has(christmas.id), false);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+});
+
+test('previously successful live rows remain protected even when currently unclassified', async () => {
+  const { monitor, rotate } = fixture([reference, vibe], { maxServers: 2,
+    query: async () => ({ name: 'Public', map: 'de_dust2', maxplayers: 32 }) });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  assert.ok([...monitor.servers.values()].every(row => row.classification.confidence === 'none' && row.lastSeenAt != null));
+  monitor.servers.get(reference.id).lastSeenAt = 0; // A valid successful timestamp must not count as unverified.
+  const prior = new Map(monitor.servers);
+  rotate([christmas]); await monitor.run('discovery');
+  assert.deepEqual(monitor.servers, prior); assert.equal(monitor.servers.has(christmas.id), false);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+});
+
+test('unclassified arrivals cannot evict earlier pending discovery rows', async () => {
+  const { monitor, rotate } = fixture([reference, vibe], { maxServers: 2 });
+  await monitor.init(); await monitor.run('discovery');
+  const prior = new Map(monitor.servers);
+  rotate(farm(0, 1)); await monitor.run('discovery');
+  assert.deepEqual(monitor.servers, prior);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+});
+
+test('evicted pending candidates also returned in the current pass count as dropped, with retained rows counted once', async () => {
+  const { monitor, rotate } = fixture([reference, vibe], { maxServers: 2 });
+  await monitor.init(); await monitor.run('discovery');
+  rotate([reference, vibe, christmas]); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 2); assert.ok(monitor.servers.has(christmas.id));
+  assert.equal(monitor.servers.has(reference.id), false); assert.ok(monitor.servers.has(vibe.id));
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
+});
