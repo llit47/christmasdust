@@ -297,6 +297,7 @@ input[type=checkbox] {
 .population {
   display:flex;
   flex-direction:column;
+  min-width:0;
   gap:3px;
 }
 .population-top {
@@ -308,7 +309,8 @@ input[type=checkbox] {
 }
 .player-sparkline {
   display:block;
-  flex:0 0 60px;
+  flex:0 1 60px;
+  min-width:0;
   width:60px;
   height:24px;
   color:var(--mint);
@@ -322,6 +324,7 @@ input[type=checkbox] {
   stroke-linejoin:round;
 }
 .population strong {
+  flex:0 0 auto;
   font-size:20px;
   font-variant-numeric:tabular-nums;
   white-space:nowrap;

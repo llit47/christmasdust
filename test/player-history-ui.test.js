@@ -77,6 +77,25 @@ test('sparkline and count share the same population row with existing open slots
   assert.equal(empty.children.length, population.children.length);
 });
 
+test('oversized reported player counts stay intact beside the chart and open slots remain nonnegative', async () => {
+  const history = points(); history[0] = 0; history[1] = 12;
+  for (const [players, slots] of [[65535, 0], [0, 32]]) {
+    const server = { id: '8.8.8.8:27015', name: 'Christmas', players, maxPlayers: 32,
+      status: 'online', classification: { confidence: 'high' } };
+    const population = nodes(serverCard(document, server, { history })).find(node => node.className === 'population');
+    assert.equal(population.children[0].children[0].textContent, `${players}/32`);
+    assert.equal(population.children[0].children[1].tag, 'svg');
+    assert.equal(population.children[1].textContent, `${slots} open slots`);
+  }
+  const css = await readFile(new URL('../public/style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.population\s*\{[^}]*min-width:0;/);
+  assert.match(css, /\.player-sparkline\s*\{[^}]*flex:0 1 60px;[^}]*min-width:0;/);
+  assert.match(css, /\.population strong\s*\{[^}]*flex:0 0 auto;[^}]*white-space:nowrap;/);
+  assert.match(css, /\.server\s*\{[^}]*grid-template-columns:minmax\(0,1fr\) 125px 235px;/);
+  assert.match(css, /@media\(max-width:950px\)[\s\S]*grid-template-columns:minmax\(0,1fr\) 110px 210px;/);
+  assert.match(css, /@media\(max-width:640px\)[\s\S]*grid-template-columns:minmax\(0,1fr\) 118px;/);
+});
+
 test('history polling is independent, throttled to five minutes, pauses hidden and retries stale visibility', async () => {
   let time = 0, hidden = false, calls = 0, updates = 0, fail = false;
   const pending = [];
