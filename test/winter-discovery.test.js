@@ -520,3 +520,34 @@ test('both reference winter servers remain eligible alongside a converged mirror
     assert.equal(row.name, candidate.name); assert.equal(row.map, candidate.map);
   }
 });
+
+for (const offset of [-1, 0, 1]) {
+  test(`winter incumbent stability uses live freshness at STALE_AFTER_MS${offset < 0 ? '-1' : offset > 0 ? '+1' : ''}, despite refreshed Steam metadata`, async () => {
+    const existing = convergingWinter(5, 2); const newcomer = convergingWinter(7, 1)[0];
+    const { monitor, rotate, advance, persisted } = fixture(existing, { query: communityQuery });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+    const lastSeenAt = monitor.now();
+    advance(monitor.config.staleAfter + offset);
+    rotate([...existing, newcomer]); await monitor.run('discovery');
+    for (const row of existing) {
+      const incumbent = monitor.servers.get(row.id);
+      assert.equal(incumbent.discoveredAt, monitor.now());
+      assert.equal(incumbent.lastSeenAt, lastSeenAt);
+    }
+    monitor.query = async row => {
+      if (row.id !== newcomer.id) throw Error('unreachable');
+      return communityQuery(row);
+    };
+    await monitor.run('live');
+    const stale = offset > 0;
+    assert.deepEqual([...monitor.servers.keys()], stale ? [existing[0].id, newcomer.id] : existing.map(row => row.id));
+    assert.equal(winterProtected(monitor).length, 2);
+    assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 3, queryFailures: 2, classificationNone: stale ? 0 : 1 });
+    assert.equal(monitor.state.livePartial, true);
+    assert.equal(persisted().servers.length, 2);
+    if (stale) {
+      assert.equal(monitor.snapshot().servers.find(row => row.id === newcomer.id).stale, false);
+      assert.equal(monitor.snapshot().servers.find(row => row.id === existing[0].id).stale, true);
+    }
+  });
+}

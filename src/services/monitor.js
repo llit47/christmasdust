@@ -52,9 +52,13 @@ export class Monitor {
       group.push(row); groups.set(name, group);
     }
     const removed = new Set();
+    const observedAt = this.now();
+    const fresh = row => row.lastSeenAt != null && observedAt - row.lastSeenAt <= this.config.staleAfter;
     for (const [name, members] of groups) {
       const incumbent = row => winterOnly(previous?.get(row.id)) && normalizedName(previous.get(row.id).name) === name;
-      members.sort((a, b) => (previous ? Number(incumbent(b)) - Number(incumbent(a)) :
+      // Discovery refreshes cannot extend a member's last-good live freshness.
+      members.sort((a, b) => Number(fresh(b)) - Number(fresh(a)) ||
+        (previous ? Number(fresh(b) && incumbent(b)) - Number(fresh(a) && incumbent(a)) :
         (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0) || (a.misses || 0) - (b.misses || 0)) ||
         (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       for (const row of members.slice(WINTER_NAME_LIMIT)) { servers.delete(row.id); removed.add(row.id); }
