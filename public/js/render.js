@@ -52,7 +52,7 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
     buttons.forEach((button, index) => {
       const value = index === 0 ? 1 : -1;
       const selected = server.ratings?.vote === value;
-      button.textContent = `${value === 1 ? '👍' : '👎'} ${server.ratings?.[value === 1 ? 'up' : 'down'] ?? 0}`;
+      button.textContent = `${value === 1 ? '👍' : '👎'} ${server.ratings === null ? '—' : server.ratings?.[value === 1 ? 'up' : 'down'] ?? 0}`;
       button.setAttribute('aria-pressed', String(selected));
       button.setAttribute('aria-label', `${selected ? 'Remove' : 'Vote'} thumbs ${value === 1 ? 'up' : 'down'} for ${server.name || server.id}`);
     });

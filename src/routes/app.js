@@ -56,7 +56,7 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now,
     const currentVoter = voterHash(req);
     let ratingsFailed = false;
     const servers = ratings ? snapshot.servers.map(server => {
-      let totals = { up: 0, down: 0, vote: null };
+      let totals = null;
       if (!ratingsFailed) {
         try { totals = ratings.totals(groupEndpointIds(server), currentVoter); }
         catch { ratingsFailed = true; /* Avoid repeated SQLite busy-timeout waits in this request. */ }

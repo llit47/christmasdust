@@ -189,8 +189,8 @@ test('server list stops ratings reads after the first failure and retries on the
   const response = await get('/api/servers');
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: { up: 0, down: 0, vote: null } });
-  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 0, down: 0, vote: null } });
+  assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: null });
+  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: null });
   assert.equal(reads, 1);
   assert.deepEqual(body.meta, { ...snapshot.meta, ratingsPartial: true, serverGeoipConfigured: false });
   assert.deepEqual(snapshot, original);
@@ -205,23 +205,24 @@ test('server list stops ratings reads after the first failure and retries on the
     { up: 2, down: 1, vote: null }, { up: 2, down: 1, vote: null }]);
 });
 
-test('ratings read failure preserves prior successful totals and skips every remaining server', async t => {
+test('ratings read failure keeps successful totals including genuine zeros and marks failed/skipped reads unavailable', async t => {
   const { get, monitor, ratings } = await fixture(t);
   const ids = [a, b, '9.9.9.9:27015', '4.4.4.4:27015'];
   monitor.snapshot = () => ({ servers: ids.map(id => ({ id })), meta: {} });
   const queried = [];
   ratings.totals = endpoints => {
     queried.push(endpoints[0]);
-    if (endpoints[0] === b) throw new Error('SQLite busy');
+    if (endpoints[0] === ids[2]) throw new Error('SQLite busy');
+    if (endpoints[0] === b) return { up: 0, down: 0, vote: null };
     return { up: 2, down: 3, vote: 1 };
   };
   const response = await get('/api/servers');
   assert.equal(response.status, 200);
-  assert.deepEqual(queried, [a, b]);
+  assert.deepEqual(queried, ids.slice(0, 3));
   const body = await response.json();
   assert.equal(body.meta.ratingsPartial, true);
   assert.deepEqual(body.servers.map(server => server.ratings), [
-    { up: 2, down: 3, vote: 1 }, ...ids.slice(1).map(() => ({ up: 0, down: 0, vote: null }))]);
+    { up: 2, down: 3, vote: 1 }, { up: 0, down: 0, vote: null }, null, null]);
 });
 
 test('HTTPS PUT and DELETE renew the existing HTTP voter cookie as Secure without changing identity', async t => {

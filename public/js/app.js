@@ -85,8 +85,7 @@ function render() {
   const rows = filterServers(snapshot.servers, { search: $('search').value, country: $('country').value,
     map: $('map').value, confidence: $('confidence').value, slots: $('slots').checked,
     favorites: $('favorites').checked, hideEmpty: $('hide-empty').checked }, favoriteIds, hiddenIds);
-  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds,
-    includeRatings: snapshot.meta.ratingsPartial !== true });
+  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position during polling.
   $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id], onRatingChange })));
@@ -104,6 +103,13 @@ async function poll() {
     if (!response.ok) throw new Error('Snapshot unavailable');
     const next = await response.json();
     if (!Array.isArray(next.servers) || !next.meta || !next.visitor) throw new Error('Invalid snapshot');
+    if (next.meta.ratingsPartial && snapshot) {
+      // Carry forward only ratings for servers still present in this snapshot.
+      const previousRatings = new Map(snapshot.servers.map(row => [row.id, row.ratings]));
+      for (const row of next.servers) {
+        if (row.ratings === null) row.ratings = previousRatings.get(row.id) ?? null;
+      }
+    }
     snapshot = next;
     const countries = countryFilterState(snapshot.servers, snapshot.meta.serverGeoipConfigured);
     options('country', countries.choices, countries.disabled ? 'Countries unavailable' : 'All countries');

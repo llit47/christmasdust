@@ -65,7 +65,9 @@ async function fixture(sort = 'recommended', { initialSnapshot, favoriteIds = []
   const list = document.getElementById('servers');
   const order = () => list.children.map(card => nodes(card).find(node => node.tag === 'h3').textContent);
   const button = nodes(list.children[1]).find(node => node.textContent === '👍 0');
-  return { document, list, order, button, setFailure: () => { fail = true; },
+  const counts = id => nodes(list.children.find(card => nodes(card).some(node => node.tag === 'h3' && node.textContent === id)))
+    .filter(node => node.tag === 'button' && /^[👍👎]/u.test(node.textContent ?? '')).map(node => node.textContent);
+  return { document, list, order, counts, button, setFailure: () => { fail = true; },
     holdVote: () => { heldVote = new Promise(resolve => { releaseVote = resolve; }); },
     releaseVote: () => { releaseVote(); heldVote = null; }, voteReads: () => voteReads,
     snapshotReads: () => snapshotReads,
@@ -73,30 +75,54 @@ async function fixture(sort = 'recommended', { initialSnapshot, favoriteIds = []
     leave: async target => { document.activeElement = target; document.listeners.focusout(); await delay(5); } };
 }
 
-test('partial ratings snapshot ignores fallback zeros in Recommended and resumes ratings on recovery', async () => {
-  const [first, second, favorite] = ['8.8.8.8:27015', '9.9.9.9:27015', '4.4.4.4:27015'];
-  const rows = [first, second, favorite].map((id, index) => ({ id, name: id, map: 'de_xmas',
-    players: index === 0 ? 8 : 1, maxPlayers: 32, status: 'online', stale: false,
-    classification: { confidence: 'high', score: index === 2 ? 1 : 12 },
-    ratings: { up: 0, down: index === 0 ? 1 : 10, vote: null } }));
-  const snapshot = { servers: rows, visitor: {}, meta: { ratingsPartial: false }, version: 'test' };
-  const ui = await fixture('recommended', { initialSnapshot: snapshot, favoriteIds: [favorite] });
-  assert.deepEqual(ui.order(), [favorite, first, second]);
+const ratingSnapshot = (totals, ratingsPartial = false) => ({
+  servers: totals.map((ratings, index) => ({ id: `8.8.8.${index + 1}:27015`, name: `8.8.8.${index + 1}:27015`,
+    map: 'de_xmas', players: 8 - index, maxPlayers: 32, status: 'online', stale: false,
+    classification: { confidence: 'high', score: 12 }, ratings })),
+  visitor: {}, meta: { ratingsPartial }, version: 'test'
+});
+const totals = (up, down = 0) => ({ up, down, vote: null });
 
-  const partial = structuredClone(snapshot);
-  partial.meta.ratingsPartial = true;
-  // The first read succeeded with a negative rating; the rest fell back to zeros.
-  for (const row of partial.servers.slice(1)) row.ratings = { up: 0, down: 0, vote: null };
-  assert.deepEqual(dependencies.rankServers(partial.servers, { favoriteIds: new Set([favorite]) }).map(row => row.id),
-    [favorite, second, first]); // Without the flag, fallback zeros incorrectly promote the second server.
+test('A/B successful reads still rank by ratings when C fails; zeros and unavailable remain distinct', async () => {
+  const partial = ratingSnapshot([totals(0, 2), totals(3), null], true);
+  const [a, b, c] = partial.servers.map(row => row.id);
+  const ui = await fixture('recommended', { initialSnapshot: partial });
+  // B beats A despite fewer players; unavailable C is neutral.
+  assert.deepEqual(ui.order(), [b, c, a]);
+  assert.deepEqual(ui.counts(c), ['👍 —', '👎 —']);
+  // A fresh successful zero total replaces B's positive rating during another partial poll.
+  await ui.poll(ratingSnapshot([totals(0, 2), totals(0), null], true));
+  assert.deepEqual(ui.order(), [b, c, a]);
+  assert.deepEqual(ui.counts(b), ['👍 0', '👎 0']);
+  assert.deepEqual(ui.counts(c), ['👍 —', '👎 —']);
+});
+
+test('failed/skipped reads retain last-good snapshot ratings and recovery replaces them', async () => {
+  const initial = ratingSnapshot([totals(1), totals(0), totals(10), totals(0, 10), totals(0)]);
+  const [a, b, c, d, favorite] = initial.servers.map(row => row.id);
+  const ui = await fixture('recommended', { initialSnapshot: initial, favoriteIds: [favorite] });
+  assert.deepEqual(ui.order(), [favorite, c, a, b, d]);
+
+  const partial = ratingSnapshot([totals(6), totals(0), null, null, null, null], true);
+  const newcomer = partial.servers[5].id;
   await ui.poll(partial);
-  assert.deepEqual(ui.order(), [favorite, first, second]);
+  assert.deepEqual(ui.order(), [favorite, c, a, b, newcomer, d]);
+  assert.deepEqual(ui.counts(a), ['👍 6', '👎 0']);
+  assert.deepEqual(ui.counts(c), ['👍 10', '👎 0']);
+  assert.deepEqual(ui.counts(d), ['👍 0', '👎 10']);
+  assert.deepEqual(ui.counts(b), ['👍 0', '👎 0']);
+  assert.deepEqual(ui.counts(newcomer), ['👍 —', '👎 —']);
+  // A second partial poll must preserve the values already carried into the snapshot.
+  await ui.poll(partial);
+  assert.deepEqual(ui.order(), [favorite, c, a, b, newcomer, d]);
 
-  const recovered = structuredClone(snapshot);
-  recovered.servers[1].ratings = { up: 2, down: 0, vote: null };
+  const recovered = ratingSnapshot([totals(6), totals(0), totals(0, 20), totals(20), totals(0), totals(0)]);
   await ui.poll(recovered);
-  assert.deepEqual(ui.order(), [favorite, second, first]);
-  assert.equal(ui.snapshotReads(), 3);
+  assert.deepEqual(ui.order(), [favorite, d, a, b, newcomer, c]);
+  assert.deepEqual(ui.counts(c), ['👍 0', '👎 20']);
+  assert.deepEqual(ui.counts(d), ['👍 20', '👎 0']);
+  assert.deepEqual(ui.counts(newcomer), ['👍 0', '👎 0']);
+  assert.equal(ui.snapshotReads(), 4);
 });
 
 test('successful Recommended vote re-sorts once on focus exit without polling or replacing the focused button', async () => {
