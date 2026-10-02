@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PlayerStatsStore, SAMPLE_MS, HISTORY_MS, RETENTION_MS } from '../src/storage/player-stats.js';
+import { PlayerStatsStore, SAMPLE_MS, SAMPLE_BATCH_SIZE, HISTORY_MS, RETENTION_MS } from '../src/storage/player-stats.js';
 
 const a = '8.8.8.8:27015', b = '1.1.1.1:27015';
 const now = 100 * 86400000 + 1200000;
@@ -71,4 +71,61 @@ test('history persists after close/reopen, uniqueness survives restart and files
   assert.equal(stats.history([a], now + SAMPLE_MS).histories[a][47], 6);
   assert.equal((await stat(path)).mode & 0o777, 0o600);
   assert.equal((await stat(join(dir, 'nested'))).mode & 0o777, 0o750);
+});
+
+test('sample writes use bounded transactions, preserving first samples and avoiding repeat transactions', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'christmasdust-stats-batch-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const stats = new PlayerStatsStore(join(dir, 'stats.sqlite')); t.after(() => stats.close());
+  const observer = new PlayerStatsStore(join(dir, 'stats.sqlite')); t.after(() => observer.close());
+  const samples = Array.from({ length: SAMPLE_BATCH_SIZE * 2 + 3 }, (_, index) =>
+    ({ id: `8.8.8.8:${27015 + index}`, players: index % 33, timestamp: now }));
+  const commands = [], visibleCounts = [];
+  const exec = stats.db.exec.bind(stats.db), insert = stats.insert;
+  stats.db.exec = sql => { commands.push(sql); return exec(sql); };
+  stats.insert = { run: (...args) => {
+    visibleCounts.push(observer.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n);
+    return insert.run(...args);
+  } };
+  stats.recordMany([...samples, { ...samples[0], players: 32 }]);
+  assert.deepEqual(commands, Array(3).fill(['BEGIN IMMEDIATE', 'COMMIT']).flat());
+  assert.deepEqual(visibleCounts, samples.map((_, index) => Math.floor(index / SAMPLE_BATCH_SIZE) * SAMPLE_BATCH_SIZE));
+  assert.equal(observer.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, samples.length);
+  assert.equal(observer.db.prepare('SELECT players FROM player_samples WHERE server_id=?').get(samples[0].id).players, 0);
+  stats.recordMany(samples.map(sample => ({ ...sample, players: 10 })));
+  assert.equal(commands.length, 6); assert.equal(visibleCounts.length, samples.length);
+});
+
+test('insert and commit failures roll back samples without poisoning deduplication or later retries', t => {
+  for (const failure of ['insert', 'commit']) {
+    const stats = store(t), insert = stats.insert, exec = stats.db.exec.bind(stats.db);
+    const samples = [{ id: a, players: 0, timestamp: now }, { id: b, players: 12, timestamp: now }];
+    if (failure === 'insert') stats.insert = { run: (...args) => {
+      if (args[0] === b) throw Error('Insert failure');
+      return insert.run(...args);
+    } };
+    else stats.db.exec = sql => { if (sql === 'COMMIT') throw Error('Commit failure'); return exec(sql); };
+    assert.throws(() => stats.recordMany(samples), /failure/);
+    assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, 0);
+    assert.equal(stats.sampled.size, 0);
+    stats.insert = insert; stats.db.exec = exec;
+    stats.recordMany(samples);
+    assert.deepEqual(stats.db.prepare('SELECT players FROM player_samples ORDER BY server_id').all().map(row => row.players), [12, 0]);
+  }
+});
+
+test('later batch failures preserve earlier commits and retry only uncommitted samples', t => {
+  const stats = store(t), insert = stats.insert;
+  const samples = Array.from({ length: SAMPLE_BATCH_SIZE + 1 }, (_, index) =>
+    ({ id: `8.8.8.8:${27015 + index}`, players: index % 33, timestamp: now }));
+  stats.insert = { run: (...args) => {
+    if (args[0] === samples.at(-1).id) throw Error('Later batch failure');
+    return insert.run(...args);
+  } };
+  assert.throws(() => stats.recordMany(samples), /Later batch failure/);
+  assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, SAMPLE_BATCH_SIZE);
+  let retries = 0;
+  stats.insert = { run: (...args) => { retries++; return insert.run(...args); } };
+  stats.recordMany(samples);
+  assert.equal(retries, 1);
+  assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, samples.length);
 });

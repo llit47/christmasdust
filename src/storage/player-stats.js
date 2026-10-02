@@ -7,6 +7,7 @@ export const SAMPLE_MS = 300000;
 export const HISTORY_MS = 1800000;
 export const HISTORY_POINTS = 48;
 export const RETENTION_MS = 7 * 86400000;
+export const SAMPLE_BATCH_SIZE = 128;
 
 export class PlayerStatsStore {
   constructor(path) {
@@ -32,15 +33,35 @@ export class PlayerStatsStore {
     this.sampleBucket = null; this.sampled = new Set(); this.lastPruneAt = -Infinity;
   }
   record(id, players, timestamp = Date.now()) {
-    if (!Number.isInteger(players) || players < 0 || players > 65535 ||
-      !Number.isSafeInteger(timestamp) || timestamp < 0) throw new Error('Invalid player sample');
-    const serverId = parseAddress(id).id;
-    const bucket = Math.floor(timestamp / SAMPLE_MS) * SAMPLE_MS;
-    // Only this bucket's endpoints are cached; this never retains a query registry.
-    if (bucket !== this.sampleBucket) { this.sampleBucket = bucket; this.sampled.clear(); }
-    if (this.sampled.has(serverId)) return;
-    this.insert.run(serverId, bucket, players);
-    this.sampled.add(serverId);
+    this.recordMany([{ id, players, timestamp }]);
+  }
+  recordMany(samples) {
+    const pending = [], seen = new Set();
+    for (const { id, players, timestamp } of samples) {
+      if (!Number.isInteger(players) || players < 0 || players > 65535 ||
+        !Number.isSafeInteger(timestamp) || timestamp < 0) throw new Error('Invalid player sample');
+      const serverId = parseAddress(id).id;
+      const bucket = Math.floor(timestamp / SAMPLE_MS) * SAMPLE_MS;
+      const key = `${serverId}@${bucket}`;
+      if ((bucket === this.sampleBucket && this.sampled.has(serverId)) || seen.has(key)) continue;
+      seen.add(key); pending.push([serverId, bucket, players]);
+    }
+    for (let offset = 0; offset < pending.length; offset += SAMPLE_BATCH_SIZE) {
+      const batch = pending.slice(offset, offset + SAMPLE_BATCH_SIZE);
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const sample of batch) this.insert.run(...sample);
+        this.db.exec('COMMIT');
+      } catch (error) {
+        try { this.db.exec('ROLLBACK'); } catch { /* SQLite may have already rolled back. */ }
+        throw error;
+      }
+      // Cache only committed samples, so a rolled-back batch remains retryable.
+      for (const [serverId, bucket] of batch) {
+        if (bucket !== this.sampleBucket) { this.sampleBucket = bucket; this.sampled.clear(); }
+        this.sampled.add(serverId);
+      }
+    }
   }
   prune(now = Date.now()) {
     if (now - this.lastPruneAt < SAMPLE_MS) return;

@@ -109,15 +109,13 @@ export class Monitor {
         for (const row of result.servers) this.add(row, this.rules.include.some(s => s.id === row.id));
       } else {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
-        let statsFailed = false;
+        const samples = [];
         const results = await mapLimit(rows, this.config.concurrency, async row => {
           const raw = await this.query(row);
           const measured = liveMetadata(raw);
           const playerCount = raw.numplayers ?? raw.players;
-          if (!this.stopped && !statsFailed && Number.isInteger(playerCount) && playerCount >= 0 && playerCount <= 65535) {
-            try { this.stats?.record(row.id, measured.players, this.now()); }
-            catch { statsFailed = true; /* Skip remaining writes this batch; retry next live run. */ }
-          }
+          if (!this.stopped && this.stats && Number.isInteger(playerCount) && playerCount >= 0 && playerCount <= 65535)
+            samples.push({ id: row.id, players: measured.players, timestamp: this.now() });
           return { ...row, ...measured, a2sFingerprint: a2sFingerprint(raw),
             liveManifestFingerprint: liveManifestFingerprint(raw), ...this.geoip(row.ip),
             ...this.themeObservation({ ...raw, tags: row.discoveryTags,
@@ -125,8 +123,10 @@ export class Monitor {
               discoverySources: row.discoverySources }, row, row.curated),
             status: 'online', misses: 0, lastSeenAt: this.now(), lastQueryAt: this.now() };
         });
-        if (!this.stopped && !statsFailed) {
-          try { this.stats?.prune(this.now()); } catch { /* Retry cleanup on later live activity. */ }
+        if (!this.stopped) {
+          // No SQLite transaction is held while game queries are in flight.
+          try { this.stats?.recordMany(samples); this.stats?.prune(this.now()); }
+          catch { /* Retry history writes/cleanup on later live activity. */ }
         }
         let successes = 0;
         results.forEach((result, i) => {

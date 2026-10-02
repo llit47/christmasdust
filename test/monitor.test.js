@@ -591,7 +591,7 @@ test('history records current measured counts only; missing counts and query fai
 test('history write and cleanup failures preserve monitoring, snapshot data and visibility', async () => {
   let writes = 0;
   const normal = fixture().monitor;
-  const broken = fixture({ stats: { record() { writes++; throw Error('SQLite unavailable'); }, prune() { throw Error('SQLite unavailable'); } } }).monitor;
+  const broken = fixture({ stats: { recordMany() { writes++; throw Error('SQLite unavailable'); }, prune() { throw Error('SQLite unavailable'); } } }).monitor;
   for (const monitor of [normal, broken]) { await monitor.init(); await monitor.run('discovery'); await monitor.run('live'); }
   assert.deepEqual(broken.snapshot(), normal.snapshot());
   assert.equal(writes, 1); await broken.run('live'); assert.equal(writes, 2);
@@ -626,4 +626,25 @@ test('invalid player counts and unmeasured GameDig player lists never create zer
   assert.equal(stats.db.prepare('SELECT COUNT(*) AS n FROM player_samples').get().n, 0);
   monitor.query = async () => ({ players: 4 }); await monitor.run('live');
   assert.equal(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=?').get(a.id).players, 4);
+});
+
+test('Monitor batches samples after queries finish while retaining each response timestamp', async () => {
+  const pending = new Map(), batches = [];
+  const { monitor, advance } = fixture({
+    query: row => new Promise(resolve => pending.set(row.id, resolve)),
+    stats: { record() { throw Error('Per-endpoint writes must not be used'); },
+      recordMany(samples) { batches.push(samples); }, prune() {} }
+  });
+  await monitor.init(); await monitor.run('discovery');
+  const live = monitor.run('live');
+  assert.equal(pending.size, 2);
+  const firstAt = monitor.now(); pending.get(a.id)({ numplayers: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(batches.length, 0); // No transaction while another query is in flight.
+  advance(SAMPLE_MS * 2);
+  const secondAt = monitor.now(); pending.get(b.id)({ numplayers: 12 });
+  await live;
+  assert.deepEqual(batches, [[{ id: a.id, players: 0, timestamp: firstAt }, { id: b.id, players: 12, timestamp: secondAt }]]);
+  assert.equal(monitor.servers.get(a.id).players, 0); assert.equal(monitor.servers.get(b.id).players, 12);
+  assert.equal(monitor.state.livePartial, false);
 });
