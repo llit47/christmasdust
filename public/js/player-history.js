@@ -73,7 +73,8 @@ export function playerSparkline(document, points, maxPlayers, historyWindow) {
       const time = new Date(historyWindow.startAt + index * historyWindow.bucketMs).toLocaleString([], {
         month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
       });
-      tooltip.textContent = `${time} · ${value}/${maxPlayers} players`;
+      const averagePlayers = Number(value.toFixed(1));
+      tooltip.textContent = `${time} · ${averagePlayers}/${maxPlayers} players (average)`;
       hit.append(tooltip); svg.append(hit);
     });
   }

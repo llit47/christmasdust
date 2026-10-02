@@ -88,11 +88,22 @@ test('pointer targets show sample times and players/capacity, including zero, bu
       month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
     assert.equal(target.children[0].tag, 'title');
-    assert.equal(target.children[0].textContent, `${time} · ${history[index]}/32 players`);
+    assert.equal(target.children[0].textContent, `${time} · ${history[index]}/32 players (average)`);
     assert.equal(target.attributes.height, '24');
     assert.equal(target.attributes.class, 'sparkline-sample');
   }
   assert.equal(playerSparkline(document, history, 32).children.some(node => node.tag === 'rect'), false);
+});
+
+test('sample tooltips round averages to at most one decimal and keep integers clean', () => {
+  const history = points();
+  history.splice(0, 6, 0, 12, 1 / 3, 12.96, 12.04, 12.25);
+  const svg = playerSparkline(document, history, 32, { startAt: 0, bucketMs: 1800000 });
+  const tooltips = svg.children.filter(node => node.tag === 'rect').map(node => node.children[0].textContent);
+  assert.deepEqual(tooltips.map(text => text.split(' · ')[1]), [
+    '0/32 players (average)', '12/32 players (average)', '0.3/32 players (average)',
+    '13/32 players (average)', '12/32 players (average)', '12.3/32 players (average)'
+  ]);
 });
 
 test('sparkline and count share the same population row with existing open slots below', () => {
