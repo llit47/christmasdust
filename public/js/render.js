@@ -1,3 +1,4 @@
+import { playerSparkline } from './player-history.js';
 import { haversine } from './ranking.js';
 export function element(document, tag, text, className) {
   const node = document.createElement(tag);
@@ -12,7 +13,7 @@ export function connection(id) {
   return { url: `steam://connect/${id}`, command: `connect ${id}` };
 }
 export function flag(code) { return /^[A-Z]{2}$/.test(code ?? '') ? [...code].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('') : '◈'; }
-export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy, rate }) {
+export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy, rate, history }) {
   const e = (tag, text, cls) => element(document, tag, text, cls);
   const card = e('article', undefined, 'server');
   const title = e('div', undefined, 'server-title');
@@ -52,7 +53,11 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   tags.append(e('span', status, server.status === 'online' && !server.stale ? 'tag online' : 'tag'), e('span', { high: 'Christmas · high confidence', probable: 'Christmas · probable', curated: 'Curated' }[server.classification.confidence] || 'Unclassified', 'tag'));
   if (server.password) tags.append(e('span', 'Password required', 'tag'));
   const population = e('div', undefined, 'population');
-  population.append(e('strong', `${server.players} / ${server.maxPlayers}`), e('span', `${Math.max(0, server.maxPlayers - server.players)} open slots${server.stale || server.status !== 'online' ? ' · last known' : ''}`));
+  const top = e('div', undefined, 'population-top');
+  top.append(e('strong', `${server.players}/${server.maxPlayers}`));
+  const sparkline = playerSparkline(document, history, server.maxPlayers);
+  if (sparkline) top.append(sparkline);
+  population.append(top, e('span', `${Math.max(0, server.maxPlayers - server.players)} open slots${server.stale || server.status !== 'online' ? ' · last known' : ''}`));
   const distance = haversine(location, server);
   if (Number.isFinite(distance)) population.append(e('small', `≈ ${Math.round(distance).toLocaleString()} km away`));
   const actions = e('div', undefined, 'server-actions');

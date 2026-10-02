@@ -16,7 +16,7 @@ test('server cards keep actions and status without rendering Server details', ()
   for (let i = 0; i < nodes.length; i++) nodes.push(...nodes[i].children);
   const text = nodes.map(node => node.textContent || '').join(' ');
   assert.equal(nodes.some(node => ['details', 'summary'].includes(node.tag)), false);
-  for (const visible of ['Christmas Dust', 'de_xmas', 'Poland', 'Online', '4 / 32', 'Connect', 'Copy command', 'Hide'])
+  for (const visible of ['Christmas Dust', 'de_xmas', 'Poland', 'Online', '4/32', 'Connect', 'Copy command', 'Hide'])
     assert.ok(text.includes(visible), visible);
   nodes.find(node => node.textContent === 'Hide').listeners.click();
   assert.equal(hidden, server);

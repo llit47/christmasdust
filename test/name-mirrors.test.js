@@ -8,6 +8,7 @@ import { classify } from '../src/domain/classify.js';
 import { filterSameNameMirrors } from '../src/domain/name-mirrors.js';
 import { parseAddress } from '../src/utils/address.js';
 import { Monitor } from '../src/services/monitor.js';
+import { PlayerStatsStore, SAMPLE_MS } from '../src/storage/player-stats.js';
 import { SnapshotStore } from '../src/storage/snapshot.js';
 
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
@@ -205,5 +206,19 @@ test('incomplete successful live replies retain last-good strong map evidence un
     assert.equal(monitor.snapshot().servers.length, 1);
     assert.equal(monitor.snapshot().servers.some(row => row.id === target), false);
     assert.equal(persisted.servers.length, 6);
+  }
+});
+
+
+test('repeated-name suppressed endpoints continue collecting their own measured history', async t => {
+  const stats = new PlayerStatsStore(':memory:'); t.after(() => stats.close());
+  const { monitor, queried } = await monitorFixture({ load: async () => null, save: async () => {} });
+  monitor.stats = stats;
+  await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(monitor.snapshot().servers.length, 1);
+  monitor.now = () => 1000000 + SAMPLE_MS; await monitor.run('live');
+  assert.equal(queried.length, 10); assert.equal(monitor.servers.size, 5);
+  for (const [index, id] of endpoints.slice(0, 5).entries()) {
+    assert.deepEqual(stats.db.prepare('SELECT players FROM player_samples WHERE server_id=? ORDER BY bucket_at').all(id).map(row => row.players), [index + 5, index + 5]);
   }
 });

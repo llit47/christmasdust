@@ -35,7 +35,7 @@ tar -xJf "$work/$archive" --strip-components=1 -C /opt/christmasdust/node
 # Fetch the bootstrap files from one checkout so they are mutually consistent.
 git clone --quiet --depth 1 --branch "$channel" -- https://github.com/llit47/christmasdust.git "$work/source"
 if [[ ! -e /etc/christmasdust/christmasdust.env ]]; then
-  sed -e 's|SNAPSHOT_PATH=.*|SNAPSHOT_PATH=/var/lib/christmasdust/snapshot.json|' -e 's|RATINGS_PATH=.*|RATINGS_PATH=/var/lib/christmasdust/ratings.sqlite|' -e 's|DETECTION_PATH=.*|DETECTION_PATH=/etc/christmasdust/detection.json|' "$work/source/.env.example" > /etc/christmasdust/christmasdust.env
+  sed -e 's|SNAPSHOT_PATH=.*|SNAPSHOT_PATH=/var/lib/christmasdust/snapshot.json|' -e 's|RATINGS_PATH=.*|RATINGS_PATH=/var/lib/christmasdust/ratings.sqlite|' -e 's|STATS_PATH=.*|STATS_PATH=/var/lib/christmasdust/player-stats.sqlite|' -e 's|DETECTION_PATH=.*|DETECTION_PATH=/etc/christmasdust/detection.json|' "$work/source/.env.example" > /etc/christmasdust/christmasdust.env
   chown root:christmasdust /etc/christmasdust/christmasdust.env
   chmod 0640 /etc/christmasdust/christmasdust.env
 fi

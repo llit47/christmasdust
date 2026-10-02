@@ -24,7 +24,7 @@ The installer installs OS prerequisites, downloads the latest official Node 24 L
 | /etc/christmasdust/christmasdust.env | Protected persistent application environment |
 | /etc/christmasdust/detection.json | Protected classification, include/exclude lists |
 | /etc/christmasdust/channel | Update branch/tag |
-| /var/lib/christmasdust/ | Persistent snapshot |
+| /var/lib/christmasdust/ | Persistent snapshot, ratings.sqlite and player-stats.sqlite |
 | /var/lib/christmasdust-geoip/ | Optional root-controlled local GeoLite2 City MMDB |
 | /etc/systemd/system/christmasdust.service | Hardened service, enabled on boot |
 | /usr/local/bin/christmasdust | Update/version/GeoIP setup command |
@@ -66,3 +66,5 @@ curl -fsS http://127.0.0.1:3001/api/ready
 ```
 
 Manual checkout users can run `npm start` directly under an unprivileged account; no root or systemd is required for development. The native updater assumes the installer's directory layout.
+
+Player history uses `STATS_PATH=/var/lib/christmasdust/player-stats.sqlite` on native installs. The candidate-owned resolver adds this setting atomically to legacy environment files before startup, including upgrades using an older updater/service unit. Existing explicit paths are preserved; custom paths must be persistent and writable by the service under its systemd restrictions. Databases use mode 0600 and the state directory 0750. Updates and rollback leave history and ratings in place, outside immutable releases.

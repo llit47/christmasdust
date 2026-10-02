@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Persist seven days of measured five-minute player samples per endpoint in a separate built-in SQLite store, with safe native update paths and no additional game queries.
+- Add a separate 24-hour player-history API with 48 half-hour averages and explicit gaps.
+- Show compact accessible SVG sparklines beside player counts, fetched every five minutes without adding card height.
+
 ## 0.3.0
 
 - Add bounded Valve Master UDP discovery alongside Steam Web API discovery.

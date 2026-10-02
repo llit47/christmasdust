@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { PlayerStatsStore } from '../src/storage/player-stats.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, symlink, readlink, rm, chmod, stat, rename } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -30,7 +31,9 @@ exec ${process.execPath} "$@"
   if (options.customPath) { await mkdir(dirname(detectionPath)); await chmod(dirname(detectionPath), 0o750); }
   await writeFile(join(dir, 'etc/channel'), 'main');
   const ratingsPath = join(dir, 'lib', options.customRatingsPath ? 'operator-ratings.sqlite' : 'ratings.sqlite');
-  const originalEnv = `HOST=127.0.0.1\nPORT=3001\nDETECTION_PATH=${options.configuredPath ?? detectionPath}\n${options.customRatingsPath ? `RATINGS_PATH=${ratingsPath}\n` : ''}`;
+  const statsPath = join(dir, 'lib', options.customStatsPath ? 'operator-stats.sqlite' : 'player-stats.sqlite');
+  const stats = new PlayerStatsStore(statsPath); stats.record('8.8.8.8:27015', 17); stats.close();
+  const originalEnv = `HOST=127.0.0.1\nPORT=3001\nDETECTION_PATH=${options.configuredPath ?? detectionPath}\n${options.customRatingsPath ? `RATINGS_PATH=${ratingsPath}\n` : ''}${options.customStatsPath ? `STATS_PATH=${statsPath}\n` : ''}`;
   await writeFile(join(dir, 'etc/christmasdust.env'), originalEnv, { mode: 0o640 });
   await writeFile(detectionPath, detectionBytes); await chmod(detectionPath, 0o640);
   if (options.defaultBytes !== undefined) await writeFile(defaultPath, options.defaultBytes);
@@ -40,7 +43,7 @@ exec ${process.execPath} "$@"
     await writeFile(backupPath, options.initialBackupBytes, { mode: 0o640 });
   }
   await writeFile(join(dir, 'fixture/package.json'), '{"type":"module"}');
-  for (const file of ['src/config/index.js', 'src/config/detection.js', 'src/utils/address.js', 'src/storage/ratings.js', 'config/christmas-maps.json', 'scripts/migrate-detection.js', 'scripts/resolve-detection.js'])
+  for (const file of ['src/config/index.js', 'src/config/detection.js', 'src/utils/address.js', 'src/storage/ratings.js', 'src/storage/player-stats.js', 'config/christmas-maps.json', 'scripts/migrate-detection.js', 'scripts/resolve-detection.js'])
     await writeFile(join(dir, 'fixture', file), (await readFile(new URL(`../${file}`, import.meta.url), 'utf8')).replaceAll('/var/lib/christmasdust', join(dir, 'lib')));
   if (failure === 'validation') await writeFile(join(dir, 'fixture/config/christmas-maps.json'), '{"strong":["duplicate"],"probable":["duplicate"]}');
   await writeFile(join(dir, 'fixture/src/services/geoip.js'), 'export const loadGeoip=async()=>()=>({});');
@@ -55,7 +58,7 @@ exec ${process.execPath} "$@"
     mv: 'target=${@: -1}; printf \'mv:%s\\n\' "$target" >> "$DEPLOY_TEST_DIR/events"; /usr/bin/mv "$@"; if [[ $DEPLOY_TEST_FAILURE == crash-after-release && $target == "$DEPLOY_TEST_DIR/root/current" ]] || [[ $DEPLOY_TEST_FAILURE == crash-after-config && $target == "$DEPLOY_TEST_DETECTION_PATH" ]]; then kill -KILL "$PPID"; fi; if [[ ! -e $DEPLOY_TEST_DIR/fault-fired ]] && { [[ $DEPLOY_TEST_FAILURE == after-release-mv && $target == "$DEPLOY_TEST_DIR/root/current" ]] || [[ $DEPLOY_TEST_FAILURE == after-config-mv && $target == "$DEPLOY_TEST_DETECTION_PATH" ]]; }; then touch "$DEPLOY_TEST_DIR/fault-fired"; exit 42; fi; if [[ $DEPLOY_TEST_FAILURE == channel && $target == "$DEPLOY_TEST_DIR/etc/channel" ]]; then exit 43; fi',
     ln: 'target=${@: -1}; printf \'ln:%s\\n\' "$target" >> "$DEPLOY_TEST_DIR/events"; if [[ $DEPLOY_TEST_FAILURE == backup-fail && $target == "$DEPLOY_TEST_BACKUP_PATH" ]]; then exit 45; fi; exec /usr/bin/ln "$@"',
     install: 'if [[ $DEPLOY_TEST_FAILURE == management ]]; then exit 44; fi; exec /usr/bin/install "$@"',
-    systemctl: 'if [[ $1 == stop && $DEPLOY_TEST_FAILURE == config-changed && ! -e $DEPLOY_TEST_DIR/config-edit-done ]]; then printf \'\\n\' >> "$DEPLOY_TEST_DETECTION_PATH"; touch "$DEPLOY_TEST_DIR/config-edit-done"; fi\nif [[ $1 == start ]]; then revision=$(cat "$DEPLOY_TEST_DIR/root/current/REVISION"); if [[ $revision == old ]] && grep -q \'"version": 2\' "$DEPLOY_TEST_DETECTION_PATH"; then echo incompatible-old-config >> "$DEPLOY_TEST_DIR/events"; exit 42; fi; if [[ $revision == candidate ]]; then (cd "$DEPLOY_TEST_DIR/root/current" && "$DEPLOY_TEST_DIR/root/node/bin/node" --env-file="$DEPLOY_TEST_DIR/etc/christmasdust.env" --input-type=module -e \'import {readConfig} from "./src/config/index.js"; import {RatingsStore} from "./src/storage/ratings.js"; const path=readConfig().ratingsPath; new RatingsStore(path).close(); console.log("ratings-path:"+path);\') >> "$DEPLOY_TEST_DIR/events"; echo changed > "$DEPLOY_TEST_DIR/lib/snapshot.json"; fi; fi\nexit 0',
+    systemctl: 'if [[ $1 == stop && $DEPLOY_TEST_FAILURE == config-changed && ! -e $DEPLOY_TEST_DIR/config-edit-done ]]; then printf \'\\n\' >> "$DEPLOY_TEST_DETECTION_PATH"; touch "$DEPLOY_TEST_DIR/config-edit-done"; fi\nif [[ $1 == start ]]; then revision=$(cat "$DEPLOY_TEST_DIR/root/current/REVISION"); if [[ $revision == old ]] && grep -q \'"version": 2\' "$DEPLOY_TEST_DETECTION_PATH"; then echo incompatible-old-config >> "$DEPLOY_TEST_DIR/events"; exit 42; fi; if [[ $revision == candidate ]]; then (cd "$DEPLOY_TEST_DIR/root/current" && "$DEPLOY_TEST_DIR/root/node/bin/node" --env-file="$DEPLOY_TEST_DIR/etc/christmasdust.env" --input-type=module -e \'import {readConfig} from "./src/config/index.js"; import {RatingsStore} from "./src/storage/ratings.js"; import {PlayerStatsStore} from "./src/storage/player-stats.js"; const config=readConfig(); new PlayerStatsStore(config.statsPath).close(); console.log("stats-path:"+config.statsPath); const path=config.ratingsPath; new RatingsStore(path).close(); console.log("ratings-path:"+path);\') >> "$DEPLOY_TEST_DIR/events"; echo changed > "$DEPLOY_TEST_DIR/lib/snapshot.json"; fi; fi\nexit 0',
     curl: 'revision=$(cat "$DEPLOY_TEST_DIR/root/current/REVISION"); if [[ $DEPLOY_TEST_FAILURE == health && $revision == candidate ]]; then exit 22; fi; if [[ $DEPLOY_TEST_FAILURE == revision && $revision == candidate ]]; then revision=wrong; fi; printf \'{"ready":true,"revision":"%s"}\\n\' "$revision"'
   };
   for (const [name, body] of Object.entries(mocks)) await writeFile(join(dir, 'bin', name), `#!/bin/bash\nset -eu\n${body}\n`, { mode: 0o755 });
@@ -82,7 +85,11 @@ exec ${process.execPath} "$@"
   const environment = await readFile(join(dir, 'etc/christmasdust.env'), 'utf8');
   const environmentStat = await stat(join(dir, 'etc/christmasdust.env'));
   const ratingsFile = await stat(ratingsPath).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
-  return { environment, environmentStat, originalEnv, ratingsPath, ratingsFile, result, firstResult, current: await readlink(join(dir, 'root/current')), snapshot, old,
+  const statsFile = await stat(statsPath);
+  const persistedStats = new PlayerStatsStore(statsPath);
+  const samples = persistedStats.db.prepare('SELECT players FROM player_samples').all().map(row => row.players);
+  persistedStats.close();
+  return { statsPath, statsFile, samples, environment, environmentStat, originalEnv, ratingsPath, ratingsFile, result, firstResult, current: await readlink(join(dir, 'root/current')), snapshot, old,
     detection: await readFile(detectionPath, 'utf8'), detectionMode: (await stat(detectionPath)).mode & 0o777,
     detectionPath, defaultDetection, backup, backupPath, backupMode: backup === null ? null : (await stat(backupPath)).mode & 0o777,
     backupOwner: backup === null ? null : (await stat(backupPath)).uid,
@@ -331,7 +338,7 @@ test('retained pre-v2 loader accepts the preserved backup after manual restorati
 test('legacy native env gains persistent ratings path before candidate starts with an old unit', async t => {
   const state = await transaction(t, '', true, legacyBytes, { repeatUpdate: true });
   assert.equal(state.result.status, 0, state.result.stdout + state.result.stderr);
-  assert.equal(state.environment, `${state.originalEnv}\nRATINGS_PATH=${state.ratingsPath}\n`);
+  assert.equal(state.environment, `${state.originalEnv}\nRATINGS_PATH=${state.ratingsPath}\nSTATS_PATH=${state.statsPath}\n`);
   assert.equal(state.environment.match(/^RATINGS_PATH=/gm).length, 1);
   assert.equal(state.environmentStat.mode & 0o777, 0o640);
   assert.equal(state.environmentStat.uid, process.getuid());
@@ -341,8 +348,8 @@ test('legacy native env gains persistent ratings path before candidate starts wi
   assert.ok(state.events.includes(`ratings-path:${state.ratingsPath}`));
 });
 
-test('native upgrade preserves an operator-defined ratings path and exact env bytes', async t => {
-  const state = await transaction(t, '', true, legacyBytes, { customRatingsPath: true });
+test('native upgrade preserves operator-defined ratings and stats paths and exact env bytes', async t => {
+  const state = await transaction(t, '', true, legacyBytes, { customRatingsPath: true, customStatsPath: true });
   assert.equal(state.result.status, 0, state.result.stdout + state.result.stderr);
   assert.equal(state.environment, state.originalEnv);
   assert.ok(state.ratingsFile?.isFile());
@@ -353,7 +360,30 @@ test('failed upgrade retains additive ratings env setting and database across ro
   const state = await transaction(t, 'health');
   assert.notEqual(state.result.status, 0);
   assert.equal(state.current, state.old);
-  assert.equal(state.environment, `${state.originalEnv}\nRATINGS_PATH=${state.ratingsPath}\n`);
+  assert.equal(state.environment, `${state.originalEnv}\nRATINGS_PATH=${state.ratingsPath}\nSTATS_PATH=${state.statsPath}\n`);
   assert.ok(state.ratingsFile?.isFile());
   assert.match(state.result.stderr, /Previous version is healthy/);
+});
+
+
+test('legacy update and repeat update keep history outside releases with restricted permissions', async t => {
+  const state = await transaction(t, '', true, legacyBytes, { repeatUpdate: true });
+  assert.equal(state.result.status, 0, state.result.stdout + state.result.stderr);
+  assert.equal(state.environment.match(/^STATS_PATH=/gm).length, 1);
+  assert.ok(state.events.includes(`stats-path:${state.statsPath}`));
+  assert.equal(state.statsFile.mode & 0o777, 0o600);
+  assert.deepEqual(state.samples, [17]);
+  assert.equal(state.environmentStat.mode & 0o777, 0o640);
+  const unit = await readFile(new URL('../deploy/christmasdust.service', import.meta.url), 'utf8');
+  const installer = await readFile(new URL('../install.sh', import.meta.url), 'utf8');
+  assert.match(unit, /Environment=STATS_PATH=\/var\/lib\/christmasdust\/player-stats.sqlite/);
+  assert.match(unit, /ReadWritePaths=\/var\/lib\/christmasdust/);
+  assert.match(installer, /STATS_PATH=\/var\/lib\/christmasdust\/player-stats.sqlite/);
+});
+
+test('history and its additive native setting survive failed update rollback', async t => {
+  const state = await transaction(t, 'health');
+  assert.notEqual(state.result.status, 0); assert.equal(state.current, state.old);
+  assert.ok(state.environment.includes(`STATS_PATH=${state.statsPath}\n`));
+  assert.deepEqual(state.samples, [17]); assert.equal(state.statsFile.mode & 0o777, 0o600);
 });
