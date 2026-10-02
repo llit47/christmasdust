@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readConfig, loadDetection } from '../src/config/index.js';
 import { classify } from '../src/domain/classify.js';
 import { combinedDiscovery } from '../src/services/combined-discovery.js';
 import { steamDiscovery } from '../src/services/discovery.js';
 import { Monitor } from '../src/services/monitor.js';
+import { SnapshotStore } from '../src/storage/snapshot.js';
 import { parseAddress } from '../src/utils/address.js';
 
 const rules = await loadDetection(new URL('../config/detection.json', import.meta.url));
@@ -334,4 +338,185 @@ test('evicted pending candidates also returned in the current pass count as drop
   assert.equal(monitor.servers.size, 2); assert.ok(monitor.servers.has(christmas.id));
   assert.equal(monitor.servers.has(reference.id), false); assert.ok(monitor.servers.has(vibe.id));
   assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
+});
+
+const convergingWinter = (start = 0, length = 5) => farm(start, length).map((row, index) => ({
+  ...row, name: `Winter Discovery ${start + index}`
+}));
+const communityNames = ['Winter Community', 'ＷＩＮＴＥＲ　COMMUNITY', ' winter-community ',
+  'WINTER   COMMUNITY', 'Winter\u200b Community'];
+const communityQuery = async row => ({ name: communityNames[(row.port - 28000) % communityNames.length],
+  map: 'de_dust2', numplayers: 4, maxplayers: 32 });
+const winterProtected = monitor => [...monitor.servers.values()].filter(row =>
+  row.classification.signals?.some(signal => signal.kind === 'live-verified-winter-name'));
+const preFixSnapshot = candidates => ({ schema: 1, state: { lastLiveAt: 1000000 }, servers: candidates.map(row => ({
+  ...row, name: 'Winter Community', status: 'online', misses: 0, players: 4, maxPlayers: 32,
+  lastSeenAt: 1000000, lastQueryAt: 1000000, discoveredAt: 999000, lastThemeMatchAt: 1000000,
+  classification: { confidence: 'probable', score: 3, reasons: ['name: live-verified targeted winter identity'],
+    signals: [{ field: 'name', kind: 'live-verified-winter-name', term: 'winter', points: 0,
+      reason: 'name: live-verified targeted winter identity' }] }
+})) });
+
+test('P1: five distinct Steam winter names converging live admit only two protected members', async () => {
+  const candidates = convergingWinter();
+  const { monitor, persisted } = fixture(candidates, { query: communityQuery });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 5);
+  assert.ok([...monitor.servers.values()].every(row => row.classification.confidence === 'none'));
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 5, candidatesRetained: 5, candidatesDropped: 0 });
+  await monitor.run('live');
+  assert.deepEqual([...monitor.servers.keys()], candidates.slice(0, 2).map(row => row.id));
+  assert.equal(winterProtected(monitor).length, 2);
+  assert.ok([...monitor.servers.values()].every(row => row.classification.confidence === 'probable'));
+  assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 5, queryFailures: 0, classificationNone: 3 });
+  assert.equal(monitor.state.livePartial, false); assert.equal(monitor.state.persistenceError, false);
+  assert.deepEqual(monitor.snapshot().meta.coverage.visibility, { monitoredEndpoints: 2, classificationNone: 0,
+    capacityHidden: 0, manifestSuppressed: 0, nameMirrorSuppressed: 0, duplicateAliases: 0, publicServers: 2 });
+  assert.equal(persisted().schema, 1); assert.equal(persisted().servers.length, 2);
+});
+
+test('repeated discovery/live cycles cannot grow a converged winter group or churn its two members', async () => {
+  const candidates = convergingWinter(); const { monitor, rotate } = fixture(candidates, { query: communityQuery });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  const survivors = [...monitor.servers.keys()];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    rotate(cycle === 0 ? candidates : convergingWinter(cycle * 5));
+    await monitor.run('discovery');
+    const queried = monitor.servers.size;
+    await monitor.run('live');
+    assert.deepEqual([...monitor.servers.keys()], survivors);
+    assert.equal(winterProtected(monitor).length, 2);
+    assert.deepEqual(monitor.coverage.live, { queriedEndpoints: queried, queryFailures: 0, classificationNone: queried - 2 });
+    assert.equal(monitor.state.livePartial, false);
+  }
+});
+
+for (const completion of ['forward', 'reverse']) {
+  test(`live-cap survivors use endpoint ID regardless of insertion or ${completion} query completion`, async () => {
+    const candidates = convergingWinter(); const pending = new Map();
+    const { monitor, advance } = fixture([...candidates].reverse(), {
+      query: row => new Promise(resolve => pending.set(row.id, () => resolve(communityQuery(row))))
+    });
+    await monitor.init(); await monitor.run('discovery');
+    const live = monitor.run('live'); assert.equal(pending.size, 5);
+    const order = completion === 'forward' ? candidates : [...candidates].reverse();
+    for (const row of order) { pending.get(row.id)(); await new Promise(resolve => setImmediate(resolve)); advance(10); }
+    await live;
+    assert.deepEqual([...monitor.servers.keys()].sort(), candidates.slice(0, 2).map(row => row.id));
+    assert.equal(winterProtected(monitor).length, 2);
+  });
+}
+
+test('scoped live queries reserve existing winter members even when newcomers have smaller endpoint IDs', async () => {
+  const existing = convergingWinter(5, 2); const newcomers = convergingWinter();
+  const { monitor, rotate } = fixture(existing, { query: communityQuery });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  const prior = new Map(monitor.servers);
+  rotate(newcomers); await monitor.run('discovery'); await monitor.run('live', newcomers.map(row => row.id));
+  assert.deepEqual(monitor.servers, prior);
+  assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 5, queryFailures: 0, classificationNone: 5 });
+});
+
+test('failed existing winter members retain their slots and last-good live data during convergence', async () => {
+  const existing = convergingWinter(5, 2); const newcomers = convergingWinter();
+  const { monitor, rotate } = fixture(existing, { query: communityQuery });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  rotate(newcomers); await monitor.run('discovery');
+  monitor.query = async row => {
+    if (existing.some(member => member.id === row.id)) throw Error('timeout');
+    return communityQuery(row);
+  };
+  await monitor.run('live');
+  assert.deepEqual([...monitor.servers.keys()], existing.map(row => row.id));
+  assert.ok([...monitor.servers.values()].every(row => row.classification.confidence === 'probable' && row.status === 'uncertain'));
+  assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 7, queryFailures: 2, classificationNone: 5 });
+  assert.equal(monitor.state.livePartial, true);
+});
+
+test('already-promoted winter groups that change live names and converge are capped too', async () => {
+  const candidates = convergingWinter(0, 4);
+  const { monitor } = fixture(candidates, { query: async row => ({
+    name: row.port < 28002 ? 'Winter Alpha' : 'Winter Beta', map: 'de_dust2', maxplayers: 32
+  }) });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(winterProtected(monitor).length, 4);
+  monitor.query = communityQuery; await monitor.run('live');
+  assert.deepEqual([...monitor.servers.keys()], candidates.slice(0, 2).map(row => row.id));
+  assert.equal(winterProtected(monitor).length, 2);
+});
+
+function exemptWinterCandidates() {
+  const candidates = convergingWinter(5, 5);
+  candidates[1].tags = 'christmas'; candidates[2].description = 'xmas';
+  candidates[3].map = 'de_christmas'; candidates[4].map = 'cs_alpin';
+  return candidates;
+}
+
+test('curated and independently classified Christmas/XMAS/catalog-map rows bypass the live winter quota', async () => {
+  const exempt = exemptWinterCandidates();
+  const { monitor } = fixture([...convergingWinter(), ...exempt], { include: [exempt[0]], query: async row => ({
+    ...await communityQuery(row), map: exempt.find(candidate => candidate.id === row.id)?.map ?? 'de_dust2'
+  }) });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(winterProtected(monitor).length, 2); assert.equal(monitor.servers.size, 7);
+  for (const row of exempt) {
+    assert.ok(monitor.servers.has(row.id));
+    assert.equal(monitor.servers.get(row.id).classification.signals.some(signal => signal.kind === 'live-verified-winter-name'), false);
+  }
+  assert.equal(monitor.servers.get(exempt[0].id).classification.confidence, 'curated');
+  assert.equal(monitor.servers.get(exempt[4].id).classification.confidence, 'probable');
+  assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 10, queryFailures: 0, classificationNone: 3 });
+});
+
+test('schema-1 pre-fix snapshot reconciles by live recency, fewer failures, then endpoint ID and persists survivors', async t => {
+  const candidates = convergingWinter(); const saved = preFixSnapshot(candidates);
+  const times = [999500, 999900, 999900, 999900, 999600];
+  saved.servers.forEach((row, index) => { row.lastSeenAt = times[index]; row.misses = index === 1 ? 2 : 0; });
+  saved.servers.reverse();
+  const directory = await mkdtemp(join(tmpdir(), 'christmasdust-winter-restore-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new SnapshotStore(join(directory, 'snapshot.json')); await store.save(saved);
+  const { monitor } = fixture([], { query: communityQuery }); monitor.store = store;
+  await monitor.init();
+  const expected = candidates.slice(2, 4).map(row => row.id);
+  assert.deepEqual([...monitor.servers.keys()].sort(), expected);
+  assert.equal(monitor.ready, true); assert.equal(winterProtected(monitor).length, 2);
+  assert.equal(monitor.snapshot().meta.coverage.visibility.monitoredEndpoints, 2);
+  await monitor.run('live');
+  const persisted = await store.load();
+  assert.equal(persisted.schema, 1); assert.deepEqual(persisted.servers.map(row => row.id).sort(), expected);
+  const restarted = fixture([], { saved: persisted }).monitor; await restarted.init();
+  assert.deepEqual([...restarted.servers.keys()].sort(), expected);
+});
+
+test('restore survivor endpoint tie-break is independent of snapshot order', async () => {
+  const candidates = convergingWinter();
+  for (const order of [candidates, [...candidates].reverse()]) {
+    const { monitor } = fixture([], { saved: preFixSnapshot(order) }); await monitor.init();
+    assert.deepEqual([...monitor.servers.keys()].sort(), candidates.slice(0, 2).map(row => row.id));
+  }
+});
+
+test('restore reconciles only winter-only rows and preserves curated and independently classified members', async () => {
+  const exempt = exemptWinterCandidates(); const saved = preFixSnapshot([...convergingWinter(), ...exempt]);
+  saved.servers[5].curated = true;
+  saved.servers[6].discoveryTags = 'christmas'; saved.servers[7].discoveryDescription = 'xmas';
+  const { monitor } = fixture([], { saved, include: [exempt[0]] }); await monitor.init();
+  assert.equal(winterProtected(monitor).length, 2); assert.equal(monitor.servers.size, 7);
+  for (const row of exempt) assert.ok(monitor.servers.has(row.id));
+  assert.equal(monitor.servers.get(exempt[0].id).classification.confidence, 'curated');
+  assert.ok(exempt.slice(1).every(row => !monitor.servers.get(row.id).classification.signals.some(signal => signal.kind === 'live-verified-winter-name')));
+});
+
+test('both reference winter servers remain eligible alongside a converged mirror farm', async () => {
+  const { monitor } = fixture([...convergingWinter(), reference, vibe], { query: async row =>
+    row.id === reference.id || row.id === vibe.id ? { name: row.name, map: row.map, maxplayers: row.maxPlayers || 32 } : communityQuery(row)
+  });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  assert.equal(monitor.servers.size, 4);
+  for (const candidate of [reference, vibe]) {
+    const row = monitor.snapshot().servers.find(row => row.id === candidate.id);
+    assert.ok(row); assert.equal(row.classification.confidence, 'probable');
+    assert.equal(row.name, candidate.name); assert.equal(row.map, candidate.map);
+  }
 });

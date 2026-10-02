@@ -5,6 +5,7 @@ import { a2sFingerprint, groupDuplicates } from '../domain/duplicates.js';
 import { liveManifestFingerprint, establishManifests, filterMirroredManifests } from '../domain/manifests.js';
 import { mapLimit } from '../utils/concurrency.js';
 import { parseAddress } from '../utils/address.js';
+const WINTER_NAME_LIMIT = 2;
 export class Monitor {
   constructor({ config, rules, discover, query, geoip = () => ({}), store, stats, now = Date.now, log = console }) {
     Object.assign(this, { config, rules, discover, query, geoip, store, stats, now, log });
@@ -32,10 +33,33 @@ export class Monitor {
         }
       }
     } catch { this.log.warn('Snapshot restore failed; starting with configured seeds'); this.state.persistenceError = true; }
+    this.reconcileWinterNames(this.servers);
     this.prune();
     for (const row of this.rules.include) this.add(row, true);
     this.prune();
     this.ready = true;
+  }
+  reconcileWinterNames(servers, previous) {
+    const included = new Set(this.rules.include.map(row => row.id));
+    const winterOnly = row => row?.classification?.confidence === 'probable' && !row.curated && !included.has(row.id) &&
+      row.classification.signals?.some(signal => signal.kind === 'live-verified-winter-name');
+    const groups = new Map();
+    for (const row of servers.values()) {
+      // Independent classification never adds this winter-only signal.
+      if (!winterOnly(row)) continue;
+      const name = normalizedName(row.name);
+      const group = groups.get(name) || [];
+      group.push(row); groups.set(name, group);
+    }
+    const removed = new Set();
+    for (const [name, members] of groups) {
+      const incumbent = row => winterOnly(previous?.get(row.id)) && normalizedName(previous.get(row.id).name) === name;
+      members.sort((a, b) => (previous ? Number(incumbent(b)) - Number(incumbent(a)) :
+        (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0) || (a.misses || 0) - (b.misses || 0)) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      for (const row of members.slice(WINTER_NAME_LIMIT)) { servers.delete(row.id); removed.add(row.id); }
+    }
+    return removed;
   }
   classification(raw, curated, liveVerified = false) {
     const classification = classify(raw, this.rules, curated);
@@ -94,7 +118,7 @@ export class Monitor {
     // Existing, independently relevant and operator-included rows bypass admission caps.
     if (!previous && !curated && theme.classification.confidence === 'none' && discoverySources?.includes('name:winter')) {
       const name = normalizedName(raw.name);
-      if ([...this.servers.values()].filter(row => normalizedName(row.name) === name).length >= 2) return;
+      if ([...this.servers.values()].filter(row => normalizedName(row.name) === name).length >= WINTER_NAME_LIMIT) return;
     }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) {
       // Relevant arrivals may displace never-verified pending discovery rows from
@@ -188,12 +212,15 @@ export class Monitor {
           try { this.stats?.recordMany(samples); this.stats?.prune(this.now()); }
           catch { /* Retry history writes/cleanup on later live activity. */ }
         }
+        // Stage the whole batch so measured names, including simultaneous name
+        // changes, are capped before any winter-only protection is committed.
+        const updated = new Map(this.servers);
         let successes = 0;
         results.forEach((result, i) => {
           if (result.status === 'fulfilled') {
             successes++;
-            if (result.value.retire) this.servers.delete(rows[i].id);
-            else { const { retire, ...updated } = result.value; this.servers.set(rows[i].id, updated); }
+            if (result.value.retire) updated.delete(rows[i].id);
+            else { const { retire, ...row } = result.value; updated.set(rows[i].id, row); }
           }
           else {
             const row = rows[i]; const misses = (row.misses || 0) + 1;
@@ -205,10 +232,18 @@ export class Monitor {
             // Recycle unreachable pending discovery slots; any successful live response protects last-good data.
             if (misses >= 3 && row.lastSeenAt == null && row.classification.confidence === 'none' &&
               !row.curated && pendingSource)
-              this.servers.delete(row.id);
-            else this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
+              updated.delete(row.id);
+            else updated.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
           }
         });
+        const capped = this.reconcileWinterNames(updated, this.servers);
+        for (const result of results) {
+          if (result.status === 'fulfilled' && capped.has(result.value.id)) {
+            // A successful capped response is an admission rejection, not a query failure.
+            result.value.classification = classify({}, this.rules);
+          }
+        }
+        this.servers = updated;
         establishManifests([...this.servers.values()], new Set(results.flatMap((result, i) =>
           result.status === 'fulfilled' ? [rows[i].id] : [])), this.now(), this.config.staleAfter);
         this.state.livePartial = successes !== rows.length;
