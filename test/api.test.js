@@ -184,3 +184,18 @@ test('history cache does not retain a result whose JSON serialization fails', as
   assert.equal((await get('/api/player-history')).status, 200);
   await get('/api/player-history'); assert.equal(reads, 2);
 });
+
+test('health and servers expose compact coverage metadata without triggering discovery or live queries', async t => {
+  const { get, monitor, calls } = await fixture(t);
+  const coverage = { discovery: { steamEndpoints: 23, masterRegionalEndpoints: 128, masterMapEndpoints: 3,
+    candidatesRetained: 12, candidatesDropped: 4 },
+  live: { queriedEndpoints: 12, queryFailures: 2, classificationNone: 3 },
+  visibility: { monitoredEndpoints: 12, classificationNone: 3, capacityHidden: 1,
+    manifestSuppressed: 0, nameMirrorSuppressed: 2, duplicateAliases: 1, publicServers: 5 } };
+  monitor.snapshot = () => ({ servers: [], meta: { coverage } });
+  const health = await (await get('/api/health')).json();
+  const servers = await (await get('/api/servers')).json();
+  assert.deepEqual(health.coverage, coverage);
+  assert.deepEqual(servers.meta.coverage, coverage);
+  assert.deepEqual(calls, []);
+});

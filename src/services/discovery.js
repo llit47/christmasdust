@@ -11,7 +11,7 @@ export function targetedTerms(rules, limit = 8) {
 }
 // Public Steam Web API. Fixed origin; neither callers nor server metadata choose URLs.
 export function steamDiscovery(config, rules, fetcher = fetch) {
-  let mapCursor = 0;
+  let mapCursor = 0; let nameCursor = 0; let winterCursor = 0;
   return async () => {
     if (config.discoveryMode === 'seeds' || !config.steamKey) return { servers: [], disabled: true, partial: false, successfulRequests: 0 };
     const catalog = [...(rules.maps?.strong || []), ...(rules.maps?.probable || [])]
@@ -20,10 +20,20 @@ export function steamDiscovery(config, rules, fetcher = fetch) {
     const maps = Array.from({ length: Math.min(20, catalog.length) }, (_, index) =>
       catalog[(mapCursor + index) % catalog.length]);
     mapCursor = catalog.length ? (mapCursor + maps.length) % catalog.length : 0;
+    // One of the existing five name slots probes weak winter identity. "snow"
+    // also matches "snowy". Skip "holiday" (not winter-specific), "ice" (e.g.
+    // service/voice) and "frozen" (generic mod branding): too noisy for this budget.
+    const winterTerms = ['winter', 'snow'].filter(term => rules.weak?.includes(term));
+    const names = targetedTerms(rules);
+    const selectedNames = Array.from({ length: Math.min(winterTerms.length ? 4 : 5, names.length) },
+      (_, index) => names[(nameCursor + index) % names.length]);
+    nameCursor = names.length ? (nameCursor + selectedNames.length) % names.length : 0;
+    if (winterTerms.length) selectedNames.push(winterTerms[winterCursor++ % winterTerms.length]);
+    winterCursor %= Math.max(1, winterTerms.length);
     const requests = [
       ...Array.from({ length: 8 }, (_, region) => ({ filter: `\\appid\\10\\gamedir\\cstrike\\region\\${region}`, source: 'regional' })),
       ...maps.map(map => ({ filter: `\\appid\\10\\gamedir\\cstrike\\map\\${map}`, source: `map:${map}` })),
-      ...targetedTerms(rules, 5).map(term => ({ filter: `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`, source: `name:${term}` }))
+      ...[...new Set(selectedNames)].map(term => ({ filter: `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`, source: `name:${term}` }))
     ];
     const results = await mapLimit(requests, 4, async ({ filter, source }) => {
       const url = new URL('https://api.steampowered.com/IGameServersService/GetServerList/v1/');

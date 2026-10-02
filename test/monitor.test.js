@@ -334,11 +334,11 @@ test('broad and targeted discovery merge safely despite a targeted failure', asy
   assert.deepEqual(result.servers.map(row => row.id).sort(), [a.id, niche.id].sort());
   assert.equal(result.servers.find(row => row.id === a.id).tags, 'xmas,secure');
   assert.equal(result.servers.find(row => row.id === niche.id).maxPlayers, 32);
-  assert.equal(result.partial, true); assert.equal(result.successfulRequests, 9);
-  assert.equal(filters.length, 10); assert.equal(peak, 4);
+  assert.equal(result.partial, true); assert.equal(result.successfulRequests, 10);
+  assert.equal(filters.length, 11); assert.equal(peak, 4);
   assert.ok(filters.every(filter => filter.startsWith('\\appid\\10\\gamedir\\cstrike\\')));
   assert.deepEqual(filters.filter(filter => filter.includes('name_match')).sort(),
-    ['\\appid\\10\\gamedir\\cstrike\\name_match\\*xmas*', '\\appid\\10\\gamedir\\cstrike\\name_match\\*santa*'].sort());
+    ['xmas', 'santa', 'snow'].map(term => `\\appid\\10\\gamedir\\cstrike\\name_match\\*${term}*`).sort());
 });
 test('default discovery fits below the stale threshold with four concurrent requests', async () => {
   const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
@@ -647,4 +647,58 @@ test('Monitor batches samples after queries finish while retaining each response
   assert.deepEqual(batches, [[{ id: a.id, players: 0, timestamp: firstAt }, { id: b.id, players: 12, timestamp: secondAt }]]);
   assert.equal(monitor.servers.get(a.id).players, 0); assert.equal(monitor.servers.get(b.id).players, 12);
   assert.equal(monitor.state.livePartial, false);
+});
+
+test('targeted winter name searches stay within five slots and rotate without broad noisy terms', async () => {
+  const config = readConfig({ STEAM_API_KEY: 'a'.repeat(32) });
+  const seen = new Set(); const weak = new Set(rules.weak);
+  let filters = [];
+  const discover = steamDiscovery(config, rules, async url => {
+    filters.push(url.searchParams.get('filter'));
+    return new Response(JSON.stringify({ response: { servers: [] } }));
+  });
+  for (let cycle = 0; cycle < 8; cycle++) {
+    filters = []; await discover();
+    const names = filters.filter(filter => filter.includes('\\name_match\\')).map(filter => filter.split('*')[1]);
+    assert.ok(names.length <= 5);
+    assert.equal(names.filter(term => weak.has(term)).length, 1);
+    assert.ok(names.some(term => ['winter', 'snow'].includes(term)));
+    assert.ok(!names.some(term => ['snowy', 'holiday', 'ice', 'frozen'].includes(term)));
+    assert.equal(filters.filter(filter => filter.includes('\\region\\')).length, 8);
+    assert.ok(filters.length <= 33);
+    names.forEach(term => seen.add(term));
+  }
+  assert.deepEqual(seen, new Set([...targetedTerms(rules), 'winter', 'snow']));
+});
+
+test('coverage diagnostics whitelist bounded source counts and distinguish querying from rejection and capacity filtering', async () => {
+  let discovers = 0;
+  const { monitor } = fixture({
+    discover: async () => {
+      discovers++;
+      return { servers: [a, b, { ...tagsOnly, name: '', tags: undefined, candidateOnly: true, discoverySources: ['master-udp'] }],
+        successfulRequests: 1, partial: false, coverage: { steamEndpoints: 2, masterRegionalEndpoints: 1,
+          masterMapEndpoints: 1, secret: 'must not appear', endpoints: [a.id] } };
+    },
+    query: async row => {
+      if (row.id === a.id) throw Error('UDP timeout');
+      if (row.id === b.id) return { name: 'Christmas B', map: 'de_xmas', maxplayers: 64 };
+      return { name: 'Public', map: 'de_dust2', maxplayers: 32 };
+    }
+  });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  const coverage = monitor.snapshot().meta.coverage;
+  assert.deepEqual(coverage.discovery, { steamEndpoints: 2, masterRegionalEndpoints: 1, masterMapEndpoints: 1,
+    candidatesRetained: 3, candidatesDropped: 0 });
+  assert.deepEqual(coverage.live, { queriedEndpoints: 3, queryFailures: 1, classificationNone: 1 });
+  assert.deepEqual(coverage.visibility, { monitoredEndpoints: 3, classificationNone: 1, capacityHidden: 1,
+    manifestSuppressed: 0, nameMirrorSuppressed: 0, duplicateAliases: 0, publicServers: 1 });
+  assert.ok(JSON.stringify(coverage).length < 600);
+  assert.equal(discovers, 1); // Diagnostic reads are snapshot-only.
+  monitor.discover = async () => ({ servers: [], successfulRequests: 1, coverage: {
+    steamEndpoints: Infinity, masterRegionalEndpoints: -100, masterMapEndpoints: 100000000, secret: 'not public'
+  } });
+  await monitor.run('discovery');
+  assert.deepEqual(monitor.snapshot().meta.coverage.discovery, { steamEndpoints: 0, masterRegionalEndpoints: 0,
+    masterMapEndpoints: 1000000, candidatesRetained: 0, candidatesDropped: 0 });
 });

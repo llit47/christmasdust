@@ -132,7 +132,9 @@ test('healthy bounded master sampling stays non-partial and rotates only actuall
   const catalog = [...rules.maps.strong, ...rules.maps.probable];
   const secondRun = await fixture.run();
   assert.equal(secondRun.partial, false); assert.equal(secondRun.successfulRequests, 4);
-  assert.equal(fixture.sends[3].filter, `${filter}\\map\\${catalog[3]}`);
+  assert.deepEqual(new Set(fixture.sends.filter(send => send.region !== 255).map(send => send.region)), new Set([0, 1, 2, 3]));
+  assert.deepEqual(new Set(fixture.sends.filter(send => send.region === 255).map(send => send.filter)),
+    new Set(catalog.slice(0, 3).map(map => `${filter}\\map\\${map}`)));
   assert.ok(fixture.sends.slice(3).every(send => send.at <= 24000 + 22500));
   fixture.clock.advance(60000); await flush();
   assert.equal(fixture.sends.length, 7); assert.equal(fixture.clock.pending(), 0);
@@ -143,11 +145,13 @@ test('pagination shares the paced run budget and unsent pages do not mark discov
   const found = await fixture.run();
   assert.equal(found.partial, false); assert.equal(found.successfulRequests, 4);
   assert.deepEqual(fixture.sends.map(send => send.at), [0, 6000, 12000, 18000]);
-  assert.equal(new Set(fixture.sends.map(send => send.filter)).size, 2);
+  assert.equal(new Set(fixture.sends.map(send => `${send.region}:${send.filter}`)).size, 2);
   assert.equal(fixture.sockets.length, 4);
   assert.equal(fixture.clock.pending(), 0);
   const next = await fixture.run(); assert.equal(next.partial, false);
-  assert.equal(fixture.sends[4].filter, `${filter}\\map\\${[...rules.maps.strong][2]}`);
+  const nextRequests = fixture.sends.slice(4);
+  assert.ok(nextRequests.some(send => send.region === 1 && send.filter === filter));
+  assert.ok(nextRequests.some(send => send.region === 255 && send.filter === `${filter}\\map\\${[...rules.maps.strong][1]}`));
 });
 
 test('a delayed pacer never sends after the master run budget', async () => {
@@ -220,7 +224,7 @@ test('master query uses fixed destination, exact wire filters and the same socke
     }
   });
   const found = await queryMaster(options, () => instance, unpaced);
-  assert.deepEqual(found, { servers: [first, second], partial: false, successfulRequests: 2, attempted: true });
+  assert.deepEqual(found, { servers: [first, second], partial: false, successfulRequests: 2, attempted: true, cursor: '0.0.0.0:0' });
   assert.equal(instance.sent.length, 2); assert.equal(instance.closed, 1);
   assert.throws(() => queryMaster({ ...options, filter: `${filter}\\map\\*` }));
   assert.throws(() => queryMaster({ ...options, ip: '127.0.0.1' }));
@@ -251,12 +255,14 @@ test('master discovery rotates the full catalog and regions with at most four fi
     return result([]);
   } });
   const catalog = [...rules.maps.strong, ...rules.maps.probable];
-  for (let run = 0; run < Math.ceil((catalog.length + 8) / 4); run++) {
+  for (let run = 0; run < Math.ceil(catalog.length / 2); run++) {
     const before = requests.length; const found = await discover();
     assert.equal(found.partial, false); assert.equal(requests.length - before, 4);
+    assert.ok(requests.slice(before).some(request => request.region !== 255));
+    assert.ok(requests.slice(before).some(request => request.region === 255));
   }
-  assert.deepEqual(requests.slice(0, catalog.length).map(request => request.filter.split('\\map\\')[1]), catalog);
-  assert.deepEqual(requests.slice(catalog.length, catalog.length + 8).map(request => request.region), [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(new Set(requests.filter(request => request.region === 255).map(request => request.filter.split('\\map\\')[1])), new Set(catalog));
+  assert.deepEqual(new Set(requests.filter(request => request.region !== 255).map(request => request.region)), new Set([0, 1, 2, 3, 4, 5, 6, 7]));
   assert.ok(requests.every(request => request.timeoutMs === 1500 && request.limit === 128));
   assert.equal(peak, 2);
 });
@@ -269,8 +275,10 @@ test('master adapter caps total endpoints, strips metadata, preserves provenance
   assert.equal(found.servers.length, 1); assert.equal(found.partial, true);
   assert.equal(found.servers[0].candidateOnly, true); assert.equal(found.servers[0].name, undefined);
   assert.equal(found.servers[0].map, undefined);
-  assert.equal(found.servers[0].discoverySources.length, 4);
-  assert.ok(found.servers[0].discoverySources.includes('master:map:de_christmas'));
+  assert.equal(found.servers[0].discoverySources.length, 3);
+  assert.ok(found.servers[0].discoverySources.includes('master:regional'));
+  assert.ok(found.servers[0].discoverySources.some(source => source.startsWith('master:map:')));
+  assert.deepEqual(found.coverage, { masterRegionalEndpoints: 2, masterMapEndpoints: 2 });
   for (const resolve of [async () => { throw Error('DNS failed'); }, () => new Promise(() => {})]) {
     const failed = await masterDiscovery({ ...config, discoveryTimeout: 10 }, rules, {
       resolve, query: () => { throw Error('must not query'); }
@@ -292,10 +300,13 @@ test('combined discovery merges endpoints once without replacing Web API metadat
   const discover = combinedDiscovery(config, rules, { web, master: () => master() });
   const found = await discover();
   assert.equal(found.servers.length, 2);
-  assert.equal(found.servers[0].name, 'Christmas Web'); assert.equal(found.servers[0].candidateOnly, false);
-  assert.deepEqual(found.servers[0].discoverySources, ['regional', 'web-api', 'master:regional', 'master-udp']);
-  assert.equal(found.servers[1].name, undefined); assert.equal(found.servers[1].candidateOnly, true);
-  assert.ok(found.servers[1].discoverySources.includes('master-udp'));
+  const webRow = found.servers.find(row => row.id === first.id);
+  const masterRow = found.servers.find(row => row.id === second.id);
+  assert.equal(webRow.name, 'Christmas Web'); assert.equal(webRow.candidateOnly, false);
+  assert.deepEqual(webRow.discoverySources, ['regional', 'web-api', 'master:regional', 'master-udp']);
+  assert.equal(masterRow.name, undefined); assert.equal(masterRow.candidateOnly, true);
+  assert.ok(masterRow.discoverySources.includes('master-udp'));
+  assert.deepEqual(found.coverage, { steamEndpoints: 1, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
   for (const failed of [() => { throw Error('UDP timeout'); }, () => result([], { partial: true, successfulRequests: 0 })]) {
     master = failed; const remaining = await discover();
     assert.equal(remaining.partial, true); assert.equal(remaining.servers.length, 1);
@@ -323,11 +334,14 @@ test('master-only endpoints enter monitoring but must pass live classification a
   assert.equal(monitor.servers.size, 8); assert.equal(monitor.snapshot().servers.length, 0);
   assert.equal(monitor.snapshot().meta.discoveryDisabled, false);
   await monitor.run('live'); assert.equal(monitor.snapshot().servers.length, 0);
+  assert.deepEqual(monitor.snapshot().meta.coverage.live, { queriedEndpoints: 8, queryFailures: 8, classificationNone: 0 });
   monitor.query = async row => { queried.push(row.id); return live(row); };
   await monitor.run('live');
   assert.equal(queried.length, 8); assert.ok(!queried.includes(excluded));
   const rows = monitor.snapshot().servers;
   assert.equal(rows.length, 2);
+  assert.deepEqual(monitor.snapshot().meta.coverage.visibility, { monitoredEndpoints: 8, classificationNone: 1,
+    capacityHidden: 1, manifestSuppressed: 3, nameMirrorSuppressed: 0, duplicateAliases: 1, publicServers: 2 });
   assert.equal(rows.find(row => row.id === first.id).classification.confidence, 'probable');
   assert.equal(rows.find(row => row.duplicateCount === 1).duplicateEndpoints.length, 1);
   assert.ok(rows.every(row => !ids.slice(1, 6).includes(row.id)));
@@ -437,4 +451,130 @@ test('pending endpoints also seen by Web API keep normal failure retention', asy
   for (let failures = 0; failures < 4; failures++) await monitor.run('live');
   assert.equal(monitor.servers.get(first.id).misses, 4);
   assert.equal(monitor.servers.get(first.id).lastSeenAt, null);
+});
+
+test('regional cursors progress across cycles independently of a large map catalog', async () => {
+  const requests = [];
+  const discover = masterDiscovery(config, rules, { resolve, query: async input => {
+    requests.push(input);
+    return result([first], { cursor: input.cursor === '0.0.0.0:0' ? first.id : second.id });
+  } });
+  for (let cycle = 0; cycle < 8; cycle++) {
+    const before = requests.length;
+    await discover();
+    const current = requests.slice(before);
+    assert.equal(current.length, 4);
+    assert.equal(current.filter(request => request.region !== 255).length, 2);
+    assert.equal(current.filter(request => request.region === 255).length, 2);
+  }
+  for (let region = 0; region < 8; region++) {
+    assert.deepEqual(requests.filter(request => request.region === region).map(request => request.cursor),
+      ['0.0.0.0:0', first.id]);
+  }
+});
+
+test('regional cursors retry timeout/error visits, reset after repeated failure and wrap after completion', async () => {
+  for (const failure of ['timeout', 'error']) {
+    const requests = []; let failures = 0;
+    const discover = masterDiscovery(config, { ...rules, maps: {} }, { resolve, query: async input => {
+      requests.push(input);
+      if (input.region === 0 && input.cursor === first.id && failures++ < 2) {
+        if (failure === 'error') throw Error('UDP adapter failure');
+        return result([], { partial: true, successfulRequests: 0, cursor: input.cursor });
+      }
+      return result([first], { cursor: input.cursor === '0.0.0.0:0' ? first.id : '0.0.0.0:0' });
+    } });
+    for (let cycle = 0; cycle < 8; cycle++) await discover();
+    assert.deepEqual(requests.filter(request => request.region === 0).map(request => request.cursor),
+      ['0.0.0.0:0', first.id, first.id, '0.0.0.0:0']);
+    assert.deepEqual(requests.filter(request => request.region === 1).map(request => request.cursor),
+      ['0.0.0.0:0', first.id, '0.0.0.0:0', first.id]);
+  }
+});
+
+test('master page cap resumes from the last returned endpoint even on a terminal page', async () => {
+  const third = parseAddress('9.9.9.9:27015');
+  const all = [first, second, third]; let cursor = '0.0.0.0:0';
+  const collected = [];
+  for (let cycle = 0; cycle < 3; cycle++) {
+    const instance = socket((current, request) => {
+      assert.equal(request.subarray(2).toString('ascii'), `${cursor}\0${filter}\0`);
+      const start = cursor === '0.0.0.0:0' ? 0 : all.findIndex(row => row.id === cursor) + 1;
+      reply(current, packet(all.slice(start).map(row => row.id)));
+    });
+    const found = await queryMaster({ ...options, limit: 1, cursor }, () => instance, unpaced);
+    collected.push(...found.servers);
+    cursor = found.cursor;
+  }
+  assert.deepEqual(collected, all);
+  assert.equal(cursor, '0.0.0.0:0');
+  assert.throws(() => queryMaster({ ...options, cursor: '8.8.8.8:27015\0\\map\\fake' }));
+});
+
+test('timed-out or budget-skipped pagination retains successfully consumed cursor progress', async () => {
+  const clock = pacingClock(); const pace = createMasterSendPacer(clock);
+  const instance = socket(current => { if (current.sent.length === 1) reply(current, packet([first.id], false)); });
+  const pending = queryMaster({ ...options, timeoutMs: 1500, deadline: 22500 }, () => instance, pace, clock);
+  await flush(); clock.advance(7500); await flush();
+  const failed = await pending;
+  assert.equal(failed.partial, true); assert.equal(failed.cursor, first.id);
+  const skippedSocket = socket(current => reply(current, packet([second.id], false)));
+  const skipped = queryMaster({ ...options, cursor: first.id, timeoutMs: 1500, deadline: clock.now() + 4000 },
+    () => skippedSocket, pace, clock);
+  clock.advance(6000); await flush();
+  const skippedResult = await skipped;
+  assert.equal(skippedResult.attempted, false);
+  assert.equal(skippedResult.cursor, first.id);
+  assert.equal(skippedSocket.sent.length, 0);
+});
+
+test('targeted Web candidates share the bounded pending pool, reach live queries and expire after failures', async () => {
+  const ids = Array.from({ length: 150 }, (_, index) => `8.8.8.8:${28000 + index}`);
+  const discover = combinedDiscovery(config, rules, {
+    web: async () => result(ids.map(id => ({ ...parseAddress(id), name: 'Winter Public', map: 'de_dust2',
+      discoverySources: ['name:winter'] }))),
+    master: async () => result([{ ...second, discoverySources: ['master:regional'] }])
+  });
+  const monitor = new Monitor({ config, rules, discover, now: () => 1000000, log: { warn() {} },
+    query: async row => ({ name: 'Winter Public', map: row.id === ids[0] ? 'de_dust2_winter' : 'de_dust2', maxplayers: 32 }),
+    store: { load: async () => null, save: async () => {} } });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 128);
+  assert.equal(monitor.servers.has(second.id), false); // Targeted samples receive admission before broad samples.
+  assert.equal(monitor.snapshot().servers.length, 0);
+  await monitor.run('live');
+  assert.deepEqual(monitor.snapshot().servers.map(row => row.id), [ids[0]]);
+  assert.equal(monitor.snapshot().servers[0].classification.confidence, 'probable');
+  assert.deepEqual(monitor.snapshot().meta.coverage.live, { queriedEndpoints: 128, queryFailures: 0, classificationNone: 127 });
+  // Complete non-matches retire on the second observation; never-queried good data isn't exposed.
+  await monitor.run('live'); assert.equal(monitor.servers.size, 1);
+  await monitor.run('discovery');
+  monitor.query = async () => { throw Error('timeout'); };
+  for (let failure = 0; failure < 3; failure++) await monitor.run('live');
+  assert.equal(monitor.servers.size, 1); // Only the previously verified row retains last-good metadata.
+});
+
+test('non-progressing master pages reset the cursor instead of trapping the region', async () => {
+  const instance = socket(current => reply(current, packet([first.id], false)));
+  const found = await queryMaster({ ...options, cursor: first.id }, () => instance, unpaced);
+  assert.equal(found.cursor, '0.0.0.0:0');
+  assert.equal(found.partial, true);
+  assert.equal(instance.sent.length, 1);
+});
+
+test('large regional samples share pending admission instead of always favoring the first region', async () => {
+  const master = masterDiscovery(config, { ...rules, maps: {} }, { resolve, query: async input => result(
+    Array.from({ length: 128 }, (_, index) => parseAddress(`8.8.8.${input.region + 1}:${28000 + index}`)),
+    { cursor: `8.8.8.${input.region + 1}:28127` }
+  ) });
+  const discover = combinedDiscovery(config, rules, { master,
+    web: async () => result([], { disabled: true, successfulRequests: 0 }) });
+  const monitor = new Monitor({ config, rules, discover, now: () => 1000000, log: { warn() {} },
+    store: { load: async () => null, save: async () => {} } });
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 128);
+  for (let region = 0; region < 4; region++)
+    assert.equal([...monitor.servers.values()].filter(row => row.ip === `8.8.8.${region + 1}`).length, 32);
+  assert.equal(monitor.snapshot().meta.coverage.discovery.masterRegionalEndpoints, 512);
+  assert.equal(monitor.snapshot().meta.coverage.discovery.candidatesDropped, 384);
 });

@@ -171,3 +171,16 @@ test('probable maps require positive non-map evidence; explicit identity and cur
   for (const map of rules.maps.strong)
     assert.equal(classify({ map }, rules).confidence, 'high', map);
 });
+
+test('verified additional Christmas maps classify strongly without widening generic winter evidence', () => {
+  for (const map of ['2000_xmas', 'de_snow2xmas', 'he_christmas']) {
+    assert.ok(rules.maps.strong.has(map));
+    const classification = classify({ name: 'Public Server', map }, rules);
+    assert.equal(classification.confidence, 'high');
+    assert.equal(classification.signals[0].kind, 'known-strong-map');
+  }
+  for (const term of ['winter', 'snow', 'snowy', 'holiday', 'ice', 'frozen']) {
+    assert.equal(classify({ name: `${term} Public`, map: 'de_dust2', discoverySources: [`name:${term}`] }, rules).confidence, 'none');
+  }
+  assert.equal(classify({ name: 'Public', map: 'de_customsnow2xmas' }, rules).confidence, 'none');
+});

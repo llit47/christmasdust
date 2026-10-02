@@ -10,6 +10,10 @@ export class Monitor {
     Object.assign(this, { config, rules, discover, query, geoip, store, stats, now, log });
     this.servers = new Map(); this.busy = null; this.ready = false; this.stopped = false;
     this.state = { lastDiscoveryAt: null, lastLiveAt: null, discoveryPartial: false, livePartial: false, persistenceError: false, discoveryDisabled: false };
+    this.coverage = {
+      discovery: { steamEndpoints: 0, masterRegionalEndpoints: 0, masterMapEndpoints: 0, candidatesRetained: 0, candidatesDropped: 0 },
+      live: { queriedEndpoints: 0, queryFailures: 0, classificationNone: 0 }
+    };
   }
   async init() {
     try {
@@ -69,9 +73,9 @@ export class Monitor {
       else { this.servers.delete(address.id); return; }
     }
     if (!previous && !curated && this.servers.size >= this.config.maxServers) { this.state.discoveryPartial = true; return; }
-    // Endpoint-only master samples must not fill the monitor with unverified servers.
-    if (!previous && !curated && raw.candidateOnly === true && [...this.servers.values()].filter(row =>
-      row.classification.confidence === 'none' && row.discoverySources?.includes('master-udp')).length >= 128) {
+    // Endpoint-only master and targeted Web samples share one bounded pending pool.
+    if (!previous && !curated && raw.candidateOnly === true && theme.classification.confidence === 'none' &&
+      [...this.servers.values()].filter(row => row.classification.confidence === 'none').length >= 128) {
       this.state.discoveryPartial = true; return;
     }
     // Discovery metadata must not overwrite a trustworthy live response.
@@ -106,7 +110,17 @@ export class Monitor {
         this.state.discoveryDisabled = result.disabled;
         this.state.discoveryPartial = result.partial || (!result.disabled && !result.successfulRequests && !result.samplingSkipped);
         if (result.successfulRequests) this.state.lastDiscoveryAt = this.now();
+        const counters = this.coverage.discovery;
+        for (const field of ['steamEndpoints', 'masterRegionalEndpoints', 'masterMapEndpoints']) {
+          const value = result.coverage?.[field];
+          counters[field] = Number.isSafeInteger(value) ? Math.max(0, Math.min(1000000, value)) : 0;
+        }
+        counters.candidatesRetained = 0; counters.candidatesDropped = 0;
         for (const row of result.servers) this.add(row, this.rules.include.some(s => s.id === row.id));
+        for (const row of result.servers) {
+          if (this.servers.has(row.id)) counters.candidatesRetained++;
+          else counters.candidatesDropped++;
+        }
       } else {
         const rows = [...this.servers.values()].filter(row => !ids || ids.includes(row.id));
         const samples = [];
@@ -137,10 +151,14 @@ export class Monitor {
           }
           else {
             const row = rows[i]; const misses = (row.misses || 0) + 1;
-            // Recycle unreachable master-only pending slots; any successful live response protects last-good data.
+            const sources = row.discoverySources;
+            const pendingSource = Array.isArray(sources) && (sources.some(source => typeof source === 'string' &&
+              (source.startsWith('name:') || source.startsWith('map:'))) ||
+              (sources.includes('master-udp') && sources.every(source => typeof source === 'string' &&
+                (source === 'master-udp' || source.startsWith('master:')))));
+            // Recycle unreachable pending discovery slots; any successful live response protects last-good data.
             if (misses >= 3 && row.lastSeenAt == null && row.classification.confidence === 'none' &&
-              !row.curated && Array.isArray(row.discoverySources) && row.discoverySources.includes('master-udp') &&
-              row.discoverySources.every(source => typeof source === 'string' && (source === 'master-udp' || source.startsWith('master:'))))
+              !row.curated && pendingSource)
               this.servers.delete(row.id);
             else this.servers.set(row.id, { ...row, misses, lastQueryAt: this.now(), status: misses >= 3 ? 'offline' : 'uncertain' });
           }
@@ -148,6 +166,8 @@ export class Monitor {
         establishManifests([...this.servers.values()], new Set(results.flatMap((result, i) =>
           result.status === 'fulfilled' ? [rows[i].id] : [])), this.now(), this.config.staleAfter);
         this.state.livePartial = successes !== rows.length;
+        this.coverage.live = { queriedEndpoints: rows.length, queryFailures: rows.length - successes,
+          classificationNone: results.filter(result => result.status === 'fulfilled' && result.value.classification.confidence === 'none').length };
         if (successes || rows.length === 0) this.state.lastLiveAt = this.now();
       }
       this.state.persistenceError = false;
@@ -165,8 +185,18 @@ export class Monitor {
     const rows = [...this.servers.values()].filter(s => s.classification.confidence !== 'none' && !(s.maxPlayers > 32)).map(({ discoveredAt, themeMisses, lastThemeMatchAt, discoveryTags, discoveryDescription, discoverySources, ...row }) => ({ ...row,
       stale: !row.lastSeenAt || this.now() - row.lastSeenAt > this.config.staleAfter,
       stability: row.misses >= 3 ? 'unreachable' : row.misses ? 'intermittent' : row.lastSeenAt ? 'responding' : 'unverified' }));
-    return { servers: groupDuplicates(filterSameNameMirrors(filterMirroredManifests(rows))),
+    const manifests = filterMirroredManifests(rows);
+    const names = filterSameNameMirrors(manifests);
+    const grouped = groupDuplicates(names);
+    return { servers: grouped,
       meta: { ...this.state, snapshotAgeMs: age, stale: age === null || age > this.config.staleAfter,
+        coverage: { ...this.coverage, visibility: {
+          monitoredEndpoints: this.servers.size,
+          classificationNone: [...this.servers.values()].filter(row => row.classification.confidence === 'none').length,
+          capacityHidden: [...this.servers.values()].filter(row => row.classification.confidence !== 'none' && row.maxPlayers > 32).length,
+          manifestSuppressed: rows.length - manifests.length, nameMirrorSuppressed: manifests.length - names.length,
+          duplicateAliases: names.length - grouped.length, publicServers: grouped.length
+        } },
         refreshing: this.busy, degraded: this.state.discoveryPartial || this.state.livePartial || this.state.persistenceError } };
   }
   start() {
