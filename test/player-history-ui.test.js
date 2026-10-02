@@ -13,54 +13,97 @@ const document = {
 const points = () => Array(48).fill(null);
 function nodes(root) { return [root, ...root.children.flatMap(nodes)]; }
 
-test('native SVG splits null gaps, renders measured zero at baseline and scales to capacity', () => {
+const marks = svg => svg.children.filter(node => ['path', 'circle'].includes(node.tag));
+
+test('native SVG splits null gaps and keeps measured zero at the fixed capacity baseline', () => {
   const history = points(); history.splice(0, 6, 0, 16, null, 32, 0, null);
   const svg = playerSparkline(document, history, 32);
   assert.equal(svg.ns, 'http://www.w3.org/2000/svg');
   assert.equal(svg.attributes.role, 'img');
-  assert.equal(svg.attributes['aria-label'], '24 hour player history, average 12, peak 32');
+  assert.match(svg.attributes['aria-label'], /scale 0 to 32 players; gaps indicate missing samples/);
   assert.equal(svg.children[0].textContent, svg.attributes['aria-label']);
-  const paths = svg.children.filter(node => node.tag === 'path');
+  const paths = marks(svg);
   assert.equal(paths.length, 2);
-  assert.equal(paths[0].attributes.d, 'M1.00,23.00 L2.23,12.00');
-  assert.equal(paths[1].attributes.d, 'M4.70,1.00 L5.94,23.00');
+  assert.equal(paths[0].attributes.d, 'M1.00,23.00 L2.02,12.00');
+  assert.equal(paths[1].attributes.d, 'M4.06,1.00 L5.09,23.00');
   const zeros = points(); zeros[0] = zeros[1] = 0;
-  assert.equal(playerSparkline(document, zeros, 32).children[1].attributes.d, 'M1.00,23.00 L2.23,23.00');
+  assert.equal(marks(playerSparkline(document, zeros, 32))[0].attributes.d, 'M1.00,23.00 L2.02,23.00');
   const low = points(); low[0] = 1; low[1] = 2;
-  assert.match(playerSparkline(document, low, 32).children[1].attributes.d, /22.31.*21.63/);
-  assert.equal(playerSparkline(document, points(), 32), null);
-  low[1] = null;
-  assert.equal(playerSparkline(document, low, 32).children[1].tag, 'circle');
-  assert.equal(playerSparkline(document, ['<script>'], 32), null);
+  assert.match(marks(playerSparkline(document, low, 32))[0].attributes.d, /22.31.*21.63/);
+  // Changing only capacity changes Y positions; low counts never stretch to the chart top.
+  assert.match(marks(playerSparkline(document, low, 64))[0].attributes.d, /22.66.*22.31/);
+  assert.deepEqual(svg.children.filter(node => node.tag === 'text').map(node => node.textContent), ['32', '16', '0']);
+  assert.deepEqual(svg.children.filter(node => node.tag === 'line').map(node => node.attributes.y1), ['1', '12', '23']);
+  assert.deepEqual(playerSparkline(document, low, 33).children.filter(node => node.tag === 'text').map(node => node.textContent),
+    ['33', '16.5', '0']);
 });
 
-test('isolated measured samples render visible circles without connecting null gaps', () => {
+test('single sample and isolated samples render dots without connecting across null gaps', () => {
+  for (const value of [0, 16, 32]) {
+    const history = points(); history[24] = value;
+    const drawn = marks(playerSparkline(document, history, 32));
+    assert.equal(drawn.length, 1);
+    assert.equal(drawn[0].tag, 'circle');
+    assert.equal(drawn[0].attributes.cy, String(23 - value / 32 * 22) + '.00');
+  }
   const history = points(); history[0] = 0; history[2] = 16; history[47] = 32;
   const svg = playerSparkline(document, history, 32);
   assert.equal(svg.attributes.viewBox, '0 0 60 24');
-  assert.equal(svg.attributes['aria-label'], '24 hour player history, average 16, peak 32');
-  assert.equal(svg.children[0].textContent, svg.attributes['aria-label']);
-  assert.equal(svg.children.some(node => node.tag === 'path'), false);
-  const markers = svg.children.filter(node => node.tag === 'circle');
-  assert.equal(markers.length, 3);
-  assert.ok(markers.every(node => node.ns === 'http://www.w3.org/2000/svg'));
-  assert.deepEqual(markers.map(node => node.attributes), [
-    { cx: '1.00', cy: '23.00', r: '1', fill: 'currentColor' },
-    { cx: '3.47', cy: '12.00', r: '1', fill: 'currentColor' },
-    { cx: '59.00', cy: '1.00', r: '1', fill: 'currentColor' }
+  assert.deepEqual(marks(svg).map(node => [node.tag, node.attributes.cx, node.attributes.cy]), [
+    ['circle', '1.00', '23.00'], ['circle', '3.04', '12.00'], ['circle', '49.00', '1.00']
   ]);
-  const zeros = points(); zeros[0] = zeros[47] = 0;
-  assert.deepEqual(playerSparkline(document, zeros, 32).children.slice(1).map(node => [node.tag, node.attributes.cy]),
-    [['circle', '23.00'], ['circle', '23.00']]);
 });
 
-test('singleton markers and contiguous paths coexist without crossing gaps', () => {
+test('singleton dots and contiguous paths coexist without crossing gaps', () => {
   const history = points(); history[0] = 0; history[2] = 16; history[3] = 32; history[47] = 0;
-  const svg = playerSparkline(document, history, 32);
-  assert.deepEqual(svg.children.slice(1).map(node => node.tag), ['circle', 'path', 'circle']);
-  assert.equal(svg.children[2].attributes.d, 'M3.47,12.00 L4.70,1.00');
-  assert.equal(svg.children[1].attributes.cy, '23.00');
-  assert.equal(svg.children[3].attributes.cy, '23.00');
+  const drawn = marks(playerSparkline(document, history, 32));
+  assert.deepEqual(drawn.map(node => node.tag), ['circle', 'path', 'circle']);
+  assert.equal(drawn[1].attributes.d, 'M3.04,12.00 L4.06,1.00');
+  assert.equal(drawn[0].attributes.cy, '23.00');
+  assert.equal(drawn[2].attributes.cy, '23.00');
+});
+
+test('missing, invalid or empty history shows a compact no-data state instead of a line', () => {
+  for (const history of [undefined, null, [], points(), ['<script>'], Array(48).fill(NaN)]) {
+    const empty = playerSparkline(document, history, 32);
+    assert.equal(empty.tag, 'span');
+    assert.equal(empty.textContent, 'No data');
+    assert.equal(empty.attributes.class, 'player-sparkline player-sparkline-empty');
+    assert.equal(empty.attributes['aria-label'], '24 hour player history: no data');
+    assert.deepEqual(empty.children, []);
+  }
+  const history = points(); history[0] = 1;
+  // Unknown capacity must not cause a per-server auto-scale.
+  for (const capacity of [undefined, 0, NaN]) assert.equal(playerSparkline(document, history, capacity).textContent, 'No data');
+});
+
+test('pointer targets show sample times and players/capacity, including zero, but skip missing samples', () => {
+  const history = points(); history[0] = 0; history[2] = 16;
+  const window = { startAt: Date.UTC(2026, 9, 1, 12), bucketMs: 1800000 };
+  const svg = playerSparkline(document, history, 32, window);
+  const targets = svg.children.filter(node => node.tag === 'rect');
+  assert.equal(targets.length, 2);
+  for (const [target, index] of targets.map((target, i) => [target, i * 2])) {
+    const time = new Date(window.startAt + index * window.bucketMs).toLocaleString([], {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    assert.equal(target.children[0].tag, 'title');
+    assert.equal(target.children[0].textContent, `${time} · ${history[index]}/32 players (average)`);
+    assert.equal(target.attributes.height, '24');
+    assert.equal(target.attributes.class, 'sparkline-sample');
+  }
+  assert.equal(playerSparkline(document, history, 32).children.some(node => node.tag === 'rect'), false);
+});
+
+test('sample tooltips round averages to at most one decimal and keep integers clean', () => {
+  const history = points();
+  history.splice(0, 6, 0, 12, 1 / 3, 12.96, 12.04, 12.25);
+  const svg = playerSparkline(document, history, 32, { startAt: 0, bucketMs: 1800000 });
+  const tooltips = svg.children.filter(node => node.tag === 'rect').map(node => node.children[0].textContent);
+  assert.deepEqual(tooltips.map(text => text.split(' · ')[1]), [
+    '0/32 players (average)', '12/32 players (average)', '0.3/32 players (average)',
+    '13/32 players (average)', '12/32 players (average)', '12.3/32 players (average)'
+  ]);
 });
 
 test('sparkline and count share the same population row with existing open slots below', () => {
@@ -104,7 +147,11 @@ test('history polling is independent, throttled to five minutes, pauses hidden a
       calls++; assert.equal(url, '/api/player-history'); assert.equal(options.cache, 'no-store');
       await new Promise(resolve => pending.push(resolve));
       return { ok: !fail, json: async () => ({ startAt: 0, bucketMs: 1800000, histories: { '8.8.8.8:27015': points() } }) };
-    }, onHistory: () => { updates++; } });
+    }, onHistory: (histories, window) => {
+      assert.deepEqual(histories, { '8.8.8.8:27015': points() });
+      assert.deepEqual(window, { startAt: 0, bucketMs: 1800000 });
+      updates++;
+    } });
   let request = poll(); await poll(); assert.equal(calls, 1);
   pending.shift()(); await request; assert.equal(updates, 1);
   for (let i = 0; i < 9; i++) { time += 30000; await poll(); }

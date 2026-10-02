@@ -11,7 +11,7 @@ const renderAfterRating = createDeferredRender(document, [$('servers'), $('hidde
 function onRatingChange() {
   if ($('sort').value === 'recommended') renderAfterRating();
 }
-let histories = {};
+let histories = {}; let historyWindow = null;
 let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
 let savedPreferences; let hiddenIds = new Set(); let choicesRestored = false;
 try { const saved = JSON.parse(localStorage.getItem('christmasdust.favorites') || '[]'); if (Array.isArray(saved)) favoriteIds = new Set(saved.filter(v => typeof v === 'string').slice(0, 5000)); } catch { /* Storage is optional. */ }
@@ -88,7 +88,7 @@ function render() {
   const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position during polling.
-  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id], onRatingChange })));
+  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id], historyWindow, onRatingChange })));
   if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length && snapshot.servers.every(row => row.stale === true) ? 'No recently verified servers are available yet.' : snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
   renderHidden();
 }
@@ -149,7 +149,7 @@ $('locate').addEventListener('click', () => {
   }, () => { $('locate').disabled = false; $('location-status').textContent = 'Location was unavailable or declined. All server browsing and country filters still work.'; }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
 });
 const pollHistory = createHistoryPoller({ fetchHistory: fetch, isHidden: () => document.hidden,
-  onHistory: next => { histories = next; renderAfterPoll(); } });
+  onHistory: (next, window) => { histories = next; historyWindow = window; renderAfterPoll(); } });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) { void poll(); void pollHistory(); }
 });

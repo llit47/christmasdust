@@ -323,6 +323,28 @@ input[type=checkbox] {
   stroke-linecap:round;
   stroke-linejoin:round;
 }
+.sparkline-guide {
+  stroke:var(--muted);
+  stroke-width:.5;
+  stroke-dasharray:2 2;
+  opacity:.5;
+}
+.sparkline-scale {
+  fill:var(--muted);
+  font-size:8px;
+  font-variant-numeric:tabular-nums;
+}
+.sparkline-sample {
+  fill:transparent;
+  pointer-events:all;
+}
+.population .player-sparkline-empty {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:10px;
+  white-space:nowrap;
+}
 .population strong {
   flex:0 0 auto;
   font-size:20px;
