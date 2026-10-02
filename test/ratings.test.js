@@ -136,14 +136,14 @@ test('mutation limits apply to voter across IPs and to IP across fresh cookies, 
   advance(); assert.equal((await vote({ serverId: a, value: -1 }, { cookie })).status, 200);
 });
 
-test('ratings cannot influence existing duplicate representative or ranking', t => {
+test('ratings cannot influence existing duplicate representative or backend ranking', t => {
   const ratings = store(t);
   const rows = [{ id: a, a2sFingerprint: 'same', status: 'online', stale: false, players: 8, maxPlayers: 32, classification: { confidence: 'high' } },
     { id: b, a2sFingerprint: 'same', status: 'online', stale: false, players: 4, maxPlayers: 32, classification: { confidence: 'high' } }];
   const before = groupDuplicates(rows);
   const rated = rows.map((row, i) => ({ ...row, ratings: { up: i * 100, down: (1 - i) * 100, vote: -1 } }));
   assert.deepEqual(groupDuplicates(rated).map(({ ratings, ...row }) => row), before);
-  assert.deepEqual(rankServers(rated).map(row => row.id), rankServers(rows).map(row => row.id));
+  assert.deepEqual(rankServers(rated, { includeRatings: false }).map(row => row.id), rankServers(rows).map(row => row.id));
 });
 
 test('compact rating controls show counts/selection, change votes, remove selection and retain data on failure', async () => {
