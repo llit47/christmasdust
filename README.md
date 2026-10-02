@@ -42,7 +42,7 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 
 ## Operation at a glance
 
-- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to 20 rotating exact-map searches and five safe theme-name searches every **10 minutes**, plus bounded secondary Valve master UDP discovery. Master-only endpoints remain hidden pending live verification.
+- Discovery: Steam AppID **10**, game directory `cstrike`, eight regional requests plus up to 20 rotating exact-map searches and at most five rotating theme-name searches every **10 minutes**, plus bounded secondary Valve master UDP discovery with regional progress between cycles. Unclassified targeted/master endpoints remain hidden in a shared bounded pool pending live verification. Compact coverage counters in `/api/health` and `/api/servers` separate discovery, query and visibility losses.
 - Monitoring: GameDig **counterstrike16**, every **45 seconds**, eight concurrent queries, five-second attempt timeout.
 - Browser: polls the cached snapshot every **30 seconds** and player history separately every **5 minutes**, pausing while hidden.
 - Storage: atomic JSON snapshots and separate built-in SQLite ratings/player history; failures preserve last known data with explicit age and degraded status.

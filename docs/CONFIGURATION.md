@@ -63,3 +63,15 @@ Use a separately downloaded [MaxMind GeoLite2 City MMDB](https://dev.maxmind.com
 GeoIP represents an approximate area, often a population center; accuracyRadiusKm is exposed when available. VPNs, hosting registrations and country centroids can mislead. Country detection alone does not infer a visitor city. MaxMind requires timely database updates/deletion under its terms; operators are responsible for the updater and license compliance.
 
 For a direct connection, keep TRUSTED_PROXIES empty. Behind a local proxy, trust only its exact source address/subnet and configure it to replace forwarded headers. TRUST_CF_COUNTRY should be enabled only when your complete proxy chain sanitizes CF-IPCountry and accepts it solely from Cloudflare. Firewall the origin to that trusted path; trusting loopback is insufficient if a public-facing proxy passes spoofed headers through. Cloudflare network lists are not silently fetched or broadly trusted by the app. When country is unknown or location is denied, all browsing remains available.
+
+## Discovery catalog additions
+
+The catalog adds three exact Christmas map identifiers, not broad substring rules:
+
+| Catalog entry | Tier | Evidence |
+| --- | --- | --- |
+| `2000_xmas` | strong | [CSserv CS 1.6 map distribution](https://www.csserv.ru/cs/maps/fy/2000_xmas) identifies the Christmas variant; punctuation in `$2000$_xmas` normalizes to the same catalog key. [Observed CS 1.6 listings](https://www.gs4u.net/ru/cs16/map-2000_xmas/page-1) also use `2000_xmas`. |
+| `de_snow2xmas` | strong | [GameBanana CS 1.6 map release](https://gamebanana.com/mods/558358). Its compound `snow2xmas` token needs the exact catalog entry rather than treating all compound snow names as strong. |
+| `he_christmas` | strong | [Mapper's SnarkPit listing](https://snarkpit.net/map?game=4) describes the Christmas HE map for Counter-Strike/CS 1.6. |
+
+Repository tests and map-catalog history were also searched: absent `de_xmas`, `de_snow` and `fy_snow` are fixtures, not additional verified catalog candidates. `de_xmas` already has explicit token evidence; generic snow maps remain excluded without corroboration. No arbitrary snow-map list was imported. Catalog additions expand exact targeted searches; high/probable score thresholds, term weights, and probable-map corroboration requirements remain unchanged.
