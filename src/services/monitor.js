@@ -113,6 +113,7 @@ export class Monitor {
         const counters = this.coverage.discovery;
         for (const field of ['steamEndpoints', 'masterRegionalEndpoints', 'masterMapEndpoints']) {
           const value = result.coverage?.[field];
+          if (value === undefined) continue;
           counters[field] = Number.isSafeInteger(value) ? Math.max(0, Math.min(1000000, value)) : 0;
         }
         counters.candidatesRetained = 0; counters.candidatesDropped = 0;

@@ -578,3 +578,57 @@ test('large regional samples share pending admission instead of always favoring 
   assert.equal(monitor.snapshot().meta.coverage.discovery.masterRegionalEndpoints, 512);
   assert.equal(monitor.snapshot().meta.coverage.discovery.candidatesDropped, 384);
 });
+
+for (const failedSource of ['web', 'master']) {
+  test(`${failedSource} coverage survives adapter failures while the other source updates, then recovers to a real zero`, async () => {
+    for (const failure of ['throw', 'reject', 'unavailable']) {
+      let failing = false, recovering = false, emptyHealthy = false, latest;
+      const fail = () => {
+        if (failure === 'throw') throw Error('adapter threw');
+        if (failure === 'reject') return Promise.reject(Error('adapter rejected'));
+        return result([], { partial: true, successfulRequests: 0 });
+      };
+      const web = () => {
+        if (failing && failedSource === 'web') return fail();
+        return result(recovering || emptyHealthy ? [] : [first, ...(failing ? [second] : [])]);
+      };
+      const master = () => {
+        if (failing && failedSource === 'master') return fail();
+        return result(recovering || emptyHealthy ? [] : [
+          { ...first, discoverySources: ['master:regional', 'master:map:de_christmas'] },
+          ...(failing ? [{ ...second, discoverySources: ['master:regional', 'master:map:de_christmas'] }] : [])
+        ]);
+      };
+      const combined = combinedDiscovery(config, rules, { web, master });
+      const monitor = new Monitor({ config, rules, discover: async () => { latest = await combined(); return latest; },
+        now: () => 1000000, log: { warn() {} }, store: { load: async () => null, save: async () => {} } });
+      const counts = () => {
+        const { steamEndpoints, masterRegionalEndpoints, masterMapEndpoints } = monitor.snapshot().meta.coverage.discovery;
+        return { steamEndpoints, masterRegionalEndpoints, masterMapEndpoints };
+      };
+      await monitor.init(); await monitor.run('discovery');
+      assert.deepEqual(counts(), { steamEndpoints: 1, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
+      assert.equal(monitor.snapshot().meta.discoveryPartial, false);
+
+      failing = true; await monitor.run('discovery');
+      assert.equal(monitor.snapshot().meta.discoveryPartial, true);
+      if (failedSource === 'web') {
+        assert.deepEqual(latest.coverage, { masterRegionalEndpoints: 2, masterMapEndpoints: 2 });
+        assert.deepEqual(counts(), { steamEndpoints: 1, masterRegionalEndpoints: 2, masterMapEndpoints: 2 });
+      } else {
+        assert.deepEqual(latest.coverage, { steamEndpoints: 2 });
+        assert.deepEqual(counts(), { steamEndpoints: 2, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
+      }
+
+      emptyHealthy = true; await monitor.run('discovery');
+      assert.equal(monitor.snapshot().meta.discoveryPartial, true);
+      assert.deepEqual(counts(), failedSource === 'web' ?
+        { steamEndpoints: 1, masterRegionalEndpoints: 0, masterMapEndpoints: 0 } :
+        { steamEndpoints: 0, masterRegionalEndpoints: 1, masterMapEndpoints: 1 });
+
+      failing = false; recovering = true; await monitor.run('discovery');
+      assert.deepEqual(counts(), { steamEndpoints: 0, masterRegionalEndpoints: 0, masterMapEndpoints: 0 });
+      assert.equal(monitor.snapshot().meta.discoveryPartial, false);
+    }
+  });
+}

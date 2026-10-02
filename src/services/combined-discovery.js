@@ -8,7 +8,8 @@ export function combinedDiscovery(config, rules, {
   return async () => {
     const results = await Promise.allSettled([Promise.resolve().then(web), Promise.resolve().then(master)]);
     const servers = new Map(); let successfulRequests = 0; let partial = false; let disabled = true; let samplingSkipped = false;
-    const coverage = { steamEndpoints: 0, masterRegionalEndpoints: 0, masterMapEndpoints: 0 };
+    // Omit unavailable sources: the monitor retains their last-good counters.
+    const coverage = {};
     for (const [index, result] of results.entries()) {
       if (result.status === 'rejected') { partial = true; disabled = false; continue; }
       const source = result.value;
@@ -29,10 +30,12 @@ export function combinedDiscovery(config, rules, {
           discoverySources: [...new Set([...(previous?.discoverySources || []), ...(raw.discoverySources || []),
             index === 0 ? 'web-api' : 'master-udp'])] });
       }
-      if (index === 0) coverage.steamEndpoints = returned.size;
-      else {
-        coverage.masterRegionalEndpoints = source.coverage?.masterRegionalEndpoints ?? regional.size;
-        coverage.masterMapEndpoints = source.coverage?.masterMapEndpoints ?? maps.size;
+      if (source.disabled || source.successfulRequests > 0) {
+        if (index === 0) coverage.steamEndpoints = returned.size;
+        else {
+          coverage.masterRegionalEndpoints = source.coverage?.masterRegionalEndpoints ?? regional.size;
+          coverage.masterMapEndpoints = source.coverage?.masterMapEndpoints ?? maps.size;
+        }
       }
     }
     // Give targeted samples first admission to the bounded pending pool, ahead of
