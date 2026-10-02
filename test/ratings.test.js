@@ -136,14 +136,14 @@ test('mutation limits apply to voter across IPs and to IP across fresh cookies, 
   advance(); assert.equal((await vote({ serverId: a, value: -1 }, { cookie })).status, 200);
 });
 
-test('ratings cannot influence existing duplicate representative or ranking', t => {
+test('ratings cannot influence existing duplicate representative or backend ranking', t => {
   const ratings = store(t);
   const rows = [{ id: a, a2sFingerprint: 'same', status: 'online', stale: false, players: 8, maxPlayers: 32, classification: { confidence: 'high' } },
     { id: b, a2sFingerprint: 'same', status: 'online', stale: false, players: 4, maxPlayers: 32, classification: { confidence: 'high' } }];
   const before = groupDuplicates(rows);
   const rated = rows.map((row, i) => ({ ...row, ratings: { up: i * 100, down: (1 - i) * 100, vote: -1 } }));
   assert.deepEqual(groupDuplicates(rated).map(({ ratings, ...row }) => row), before);
-  assert.deepEqual(rankServers(rated).map(row => row.id), rankServers(rows).map(row => row.id));
+  assert.deepEqual(rankServers(rated, { includeRatings: false }).map(row => row.id), rankServers(rows).map(row => row.id));
 });
 
 test('compact rating controls show counts/selection, change votes, remove selection and retain data on failure', async () => {
@@ -189,35 +189,40 @@ test('server list stops ratings reads after the first failure and retries on the
   const response = await get('/api/servers');
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: { up: 0, down: 0, vote: null } });
-  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 0, down: 0, vote: null } });
+  assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: null });
+  assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: null });
   assert.equal(reads, 1);
-  assert.deepEqual(body.meta, { ...snapshot.meta, serverGeoipConfigured: false });
+  assert.deepEqual(body.meta, { ...snapshot.meta, ratingsPartial: true, serverGeoipConfigured: false });
   assert.deepEqual(snapshot, original);
   assert.equal((await vote({ serverId: a, value: 1 })).status, 500);
   ratings.totals = () => { reads++; return { up: 2, down: 1, vote: null }; };
   const recovered = await get('/api/servers');
   assert.equal(recovered.status, 200);
   assert.equal(reads, 4); // Initial read, failed mutation read, then both servers on recovery.
-  assert.deepEqual((await recovered.json()).servers.map(server => server.ratings), [
+  const recoveredBody = await recovered.json();
+  assert.equal(recoveredBody.meta.ratingsPartial, false);
+  assert.deepEqual(recoveredBody.servers.map(server => server.ratings), [
     { up: 2, down: 1, vote: null }, { up: 2, down: 1, vote: null }]);
 });
 
-test('ratings read failure preserves prior successful totals and skips every remaining server', async t => {
+test('ratings read failure keeps successful totals including genuine zeros and marks failed/skipped reads unavailable', async t => {
   const { get, monitor, ratings } = await fixture(t);
   const ids = [a, b, '9.9.9.9:27015', '4.4.4.4:27015'];
   monitor.snapshot = () => ({ servers: ids.map(id => ({ id })), meta: {} });
   const queried = [];
   ratings.totals = endpoints => {
     queried.push(endpoints[0]);
-    if (endpoints[0] === b) throw new Error('SQLite busy');
+    if (endpoints[0] === ids[2]) throw new Error('SQLite busy');
+    if (endpoints[0] === b) return { up: 0, down: 0, vote: null };
     return { up: 2, down: 3, vote: 1 };
   };
   const response = await get('/api/servers');
   assert.equal(response.status, 200);
-  assert.deepEqual(queried, [a, b]);
-  assert.deepEqual((await response.json()).servers.map(server => server.ratings), [
-    { up: 2, down: 3, vote: 1 }, ...ids.slice(1).map(() => ({ up: 0, down: 0, vote: null }))]);
+  assert.deepEqual(queried, ids.slice(0, 3));
+  const body = await response.json();
+  assert.equal(body.meta.ratingsPartial, true);
+  assert.deepEqual(body.servers.map(server => server.ratings), [
+    { up: 2, down: 3, vote: 1 }, { up: 0, down: 0, vote: null }, null, null]);
 });
 
 test('HTTPS PUT and DELETE renew the existing HTTP voter cookie as Secure without changing identity', async t => {

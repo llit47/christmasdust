@@ -6,6 +6,18 @@ export function renderWhenUnfocused(activeElement, regions, render) {
   if (!regions.some(region => region.contains(activeElement))) render();
 }
 
+export function createDeferredRender(document, regions, render) {
+  let pending = false;
+  const flush = () => {
+    if (!pending || regions.some(region => region.contains(document.activeElement))) return;
+    pending = false;
+    render();
+  };
+  // Wait for the browser to finish moving focus before inspecting activeElement.
+  document.addEventListener('focusout', () => { if (pending) setTimeout(flush, 0); });
+  return () => { pending = true; flush(); };
+}
+
 export function lastUpdateLabel(lastLiveAt) {
   const date = typeof lastLiveAt === 'number' ? new Date(lastLiveAt) : null;
   const time = date && Number.isFinite(date.getTime())

@@ -13,7 +13,7 @@ export function connection(id) {
   return { url: `steam://connect/${id}`, command: `connect ${id}` };
 }
 export function flag(code) { return /^[A-Z]{2}$/.test(code ?? '') ? [...code].map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('') : '◈'; }
-export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy, rate, history }) {
+export function serverCard(document, server, { location, favorite, toggleFavorite, hide, copy, rate, history, onRatingChange }) {
   const e = (tag, text, cls) => element(document, tag, text, cls);
   const card = e('article', undefined, 'server');
   const title = e('div', undefined, 'server-title');
@@ -24,15 +24,27 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
   title.append(star, heading);
   const ratings = e('div', undefined, 'ratings');
   ratings.setAttribute('aria-label', 'Anonymous server ratings');
+  let ratingPending = false;
   const buttons = [1, -1].map(value => {
     const button = e('button'); button.type = 'button';
     button.addEventListener('click', async () => {
-      buttons.forEach(node => { node.disabled = true; });
+      if (ratingPending) return;
+      ratingPending = true;
+      let updated;
+      buttons.forEach(node => {
+        // Keep the focused control focusable while blocking repeated votes.
+        node.disabled = document.activeElement !== node;
+        node.setAttribute('aria-disabled', 'true');
+      });
       try {
-        const updated = await rate(server, server.ratings?.vote === value ? null : value);
+        updated = await rate(server, server.ratings?.vote === value ? null : value);
         if (updated) server.ratings = updated;
         drawRatings();
-      } finally { buttons.forEach(node => { node.disabled = false; }); }
+      } finally {
+        ratingPending = false;
+        buttons.forEach(node => { node.disabled = false; node.setAttribute('aria-disabled', 'false'); });
+      }
+      if (updated) onRatingChange?.();
     });
     ratings.append(button); return button;
   });
@@ -40,7 +52,7 @@ export function serverCard(document, server, { location, favorite, toggleFavorit
     buttons.forEach((button, index) => {
       const value = index === 0 ? 1 : -1;
       const selected = server.ratings?.vote === value;
-      button.textContent = `${value === 1 ? '👍' : '👎'} ${server.ratings?.[value === 1 ? 'up' : 'down'] ?? 0}`;
+      button.textContent = `${value === 1 ? '👍' : '👎'} ${server.ratings === null ? '—' : server.ratings?.[value === 1 ? 'up' : 'down'] ?? 0}`;
       button.setAttribute('aria-pressed', String(selected));
       button.setAttribute('aria-label', `${selected ? 'Remove' : 'Vote'} thumbs ${value === 1 ? 'up' : 'down'} for ${server.name || server.id}`);
     });

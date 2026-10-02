@@ -40,7 +40,8 @@ export function groupDuplicates(rows) {
   }
   const visible = [];
   for (const group of groups.values()) {
-    const chosen = rankServers(group)[0];
+    // Public ratings must not influence the backend endpoint representative.
+    const chosen = rankServers(group, { includeRatings: false })[0];
     const { a2sFingerprint, ...publicRow } = chosen;
     visible.push({ ...publicRow, duplicateCount: group.length - 1,
       duplicateEndpoints: group.filter(row => row.id !== chosen.id).map(row => row.id).sort() });

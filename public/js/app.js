@@ -5,8 +5,12 @@ import { countryFilterState, filterServers } from './filters.js';
 import { isFavorite, toggleServerFavorite } from './favorites.js';
 import { availableChoice, readPreferences, restoredSort, writePreferences } from './preferences.js';
 import { hiddenEntries, hideServer, readHidden, restoreServer, writeHidden } from './hidden.js';
-import { lastUpdateLabel, renderWhenUnfocused, setLocationSort, snapshotNotice } from './view-state.js';
+import { createDeferredRender, lastUpdateLabel, renderWhenUnfocused, setLocationSort, snapshotNotice } from './view-state.js';
 const $ = id => document.getElementById(id);
+const renderAfterRating = createDeferredRender(document, [$('servers'), $('hidden-section')], render);
+function onRatingChange() {
+  if ($('sort').value === 'recommended') renderAfterRating();
+}
 let histories = {};
 let snapshot = null; let location = null; let favoriteIds = new Set(); let loading = false; let toastTimer;
 let savedPreferences; let hiddenIds = new Set(); let choicesRestored = false;
@@ -81,10 +85,10 @@ function render() {
   const rows = filterServers(snapshot.servers, { search: $('search').value, country: $('country').value,
     map: $('map').value, confidence: $('confidence').value, slots: $('slots').checked,
     favorites: $('favorites').checked, hideEmpty: $('hide-empty').checked }, favoriteIds, hiddenIds);
-  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value });
+  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position during polling.
-  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id] })));
+  $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id], onRatingChange })));
   if (!sorted.length) $('servers').append(element(document, 'p', snapshot.servers.length && snapshot.servers.every(row => row.stale === true) ? 'No recently verified servers are available yet.' : snapshot.servers.length ? 'No servers match these filters. Try a broader search.' : 'No winter servers in the snapshot yet. Discovery may be warming up, or the operator may need to configure discovery or curated servers.', 'empty'));
   renderHidden();
 }
@@ -99,6 +103,13 @@ async function poll() {
     if (!response.ok) throw new Error('Snapshot unavailable');
     const next = await response.json();
     if (!Array.isArray(next.servers) || !next.meta || !next.visitor) throw new Error('Invalid snapshot');
+    if (next.meta.ratingsPartial && snapshot) {
+      // Carry forward only ratings for servers still present in this snapshot.
+      const previousRatings = new Map(snapshot.servers.map(row => [row.id, row.ratings]));
+      for (const row of next.servers) {
+        if (row.ratings === null) row.ratings = previousRatings.get(row.id) ?? null;
+      }
+    }
     snapshot = next;
     const countries = countryFilterState(snapshot.servers, snapshot.meta.serverGeoipConfigured);
     options('country', countries.choices, countries.disabled ? 'Countries unavailable' : 'All countries');
