@@ -63,7 +63,7 @@ export function createApp({ config, monitor, geoip = () => ({}), now = Date.now,
       }
       return { ...server, ratings: totals };
     }) : snapshot.servers;
-    res.json({ ...snapshot, servers, meta: { ...snapshot.meta, serverGeoipConfigured: Boolean(config.geoipPath) }, visitor: { countryCode }, version });
+    res.json({ ...snapshot, servers, meta: { ...snapshot.meta, ratingsPartial: ratingsFailed, serverGeoipConfigured: Boolean(config.geoipPath) }, visitor: { countryCode }, version });
   });
   let lastAdmin = -Infinity;
   app.post('/api/admin/refresh', (req, res) => {

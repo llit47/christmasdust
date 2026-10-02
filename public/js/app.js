@@ -85,7 +85,8 @@ function render() {
   const rows = filterServers(snapshot.servers, { search: $('search').value, country: $('country').value,
     map: $('map').value, confidence: $('confidence').value, slots: $('slots').checked,
     favorites: $('favorites').checked, hideEmpty: $('hide-empty').checked }, favoriteIds, hiddenIds);
-  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds });
+  const sorted = rankServers(rows, { countryCode: snapshot.visitor.countryCode, location, sort: $('sort').value, favoriteIds,
+    includeRatings: snapshot.meta.ratingsPartial !== true });
   $('count').textContent = `${sorted.length} servers · ${sorted.filter(r => r.status === 'online' && !r.stale).reduce((sum, r) => sum + r.players, 0)} players online`;
   // Defer replacement while a card is focused to preserve keyboard position during polling.
   $('servers').replaceChildren(...sorted.map(row => serverCard(document, row, { location, favorite: isFavorite(row, favoriteIds), toggleFavorite, hide, copy, rate, history: histories[row.id], onRatingChange })));

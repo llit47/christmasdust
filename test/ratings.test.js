@@ -192,14 +192,16 @@ test('server list stops ratings reads after the first failure and retries on the
   assert.deepEqual(body.servers[0], { ...snapshot.servers[0], ratings: { up: 0, down: 0, vote: null } });
   assert.deepEqual(body.servers[1], { ...snapshot.servers[1], ratings: { up: 0, down: 0, vote: null } });
   assert.equal(reads, 1);
-  assert.deepEqual(body.meta, { ...snapshot.meta, serverGeoipConfigured: false });
+  assert.deepEqual(body.meta, { ...snapshot.meta, ratingsPartial: true, serverGeoipConfigured: false });
   assert.deepEqual(snapshot, original);
   assert.equal((await vote({ serverId: a, value: 1 })).status, 500);
   ratings.totals = () => { reads++; return { up: 2, down: 1, vote: null }; };
   const recovered = await get('/api/servers');
   assert.equal(recovered.status, 200);
   assert.equal(reads, 4); // Initial read, failed mutation read, then both servers on recovery.
-  assert.deepEqual((await recovered.json()).servers.map(server => server.ratings), [
+  const recoveredBody = await recovered.json();
+  assert.equal(recoveredBody.meta.ratingsPartial, false);
+  assert.deepEqual(recoveredBody.servers.map(server => server.ratings), [
     { up: 2, down: 1, vote: null }, { up: 2, down: 1, vote: null }]);
 });
 
@@ -216,7 +218,9 @@ test('ratings read failure preserves prior successful totals and skips every rem
   const response = await get('/api/servers');
   assert.equal(response.status, 200);
   assert.deepEqual(queried, [a, b]);
-  assert.deepEqual((await response.json()).servers.map(server => server.ratings), [
+  const body = await response.json();
+  assert.equal(body.meta.ratingsPartial, true);
+  assert.deepEqual(body.servers.map(server => server.ratings), [
     { up: 2, down: 3, vote: 1 }, ...ids.slice(1).map(() => ({ up: 0, down: 0, vote: null }))]);
 });
 

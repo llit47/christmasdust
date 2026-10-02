@@ -12,7 +12,7 @@ for (const match of source.matchAll(/^import \{ ([^}]+) \} from '([^']+)';$/gm))
 }
 const nodes = root => [root, ...root.children.flatMap(nodes)];
 
-async function fixture(sort = 'recommended') {
+async function fixture(sort = 'recommended', { initialSnapshot, favoriteIds = [] } = {}) {
   const elements = new Map();
   const document = { hidden: false, listeners: {},
     addEventListener(name, callback) { this.listeners[name] = callback; },
@@ -43,10 +43,11 @@ async function fixture(sort = 'recommended') {
   document.body = document.createElement('body'); document.activeElement = document.body;
   const rows = ['8.8.8.8:27015', '9.9.9.9:27015'].map(id => ({ id, name: id, map: 'de_xmas',
     players: 1, maxPlayers: 32, status: 'online', stale: false, classification: { confidence: 'high', score: 12 } }));
+  let snapshot = initialSnapshot ?? { servers: rows, visitor: {}, meta: {}, version: 'test' };
   let fail = false, snapshotReads = 0, voteReads = 0, heldVote, releaseVote;
   runInNewContext(source.replace(/^import .*;\n/gm, ''), {
     ...dependencies, document, navigator: {}, AbortSignal,
-    localStorage: { getItem: key => key.endsWith('preferences') ? JSON.stringify({ sort }) : null, setItem() {} },
+    localStorage: { getItem: key => key.endsWith('preferences') ? JSON.stringify({ sort }) : key.endsWith('favorites') ? JSON.stringify(favoriteIds) : null, setItem() {} },
     setInterval() {}, setTimeout() {}, clearTimeout() {},
     fetch: async path => {
       if (path === '/api/player-history') return { ok: false };
@@ -57,7 +58,7 @@ async function fixture(sort = 'recommended') {
           json: async () => ({ ratings: { up: 1, down: 0, vote: 1 } }) };
       }
       snapshotReads++;
-      return { ok: true, json: async () => ({ servers: rows, visitor: {}, meta: {}, version: 'test' }) };
+      return { ok: true, json: async () => structuredClone(snapshot) };
     }
   });
   await delay(0);
@@ -68,8 +69,35 @@ async function fixture(sort = 'recommended') {
     holdVote: () => { heldVote = new Promise(resolve => { releaseVote = resolve; }); },
     releaseVote: () => { releaseVote(); heldVote = null; }, voteReads: () => voteReads,
     snapshotReads: () => snapshotReads,
+    poll: async next => { snapshot = next; document.listeners.visibilitychange(); await delay(0); },
     leave: async target => { document.activeElement = target; document.listeners.focusout(); await delay(5); } };
 }
+
+test('partial ratings snapshot ignores fallback zeros in Recommended and resumes ratings on recovery', async () => {
+  const [first, second, favorite] = ['8.8.8.8:27015', '9.9.9.9:27015', '4.4.4.4:27015'];
+  const rows = [first, second, favorite].map((id, index) => ({ id, name: id, map: 'de_xmas',
+    players: index === 0 ? 8 : 1, maxPlayers: 32, status: 'online', stale: false,
+    classification: { confidence: 'high', score: index === 2 ? 1 : 12 },
+    ratings: { up: 0, down: index === 0 ? 1 : 10, vote: null } }));
+  const snapshot = { servers: rows, visitor: {}, meta: { ratingsPartial: false }, version: 'test' };
+  const ui = await fixture('recommended', { initialSnapshot: snapshot, favoriteIds: [favorite] });
+  assert.deepEqual(ui.order(), [favorite, first, second]);
+
+  const partial = structuredClone(snapshot);
+  partial.meta.ratingsPartial = true;
+  // The first read succeeded with a negative rating; the rest fell back to zeros.
+  for (const row of partial.servers.slice(1)) row.ratings = { up: 0, down: 0, vote: null };
+  assert.deepEqual(dependencies.rankServers(partial.servers, { favoriteIds: new Set([favorite]) }).map(row => row.id),
+    [favorite, second, first]); // Without the flag, fallback zeros incorrectly promote the second server.
+  await ui.poll(partial);
+  assert.deepEqual(ui.order(), [favorite, first, second]);
+
+  const recovered = structuredClone(snapshot);
+  recovered.servers[1].ratings = { up: 2, down: 0, vote: null };
+  await ui.poll(recovered);
+  assert.deepEqual(ui.order(), [favorite, second, first]);
+  assert.equal(ui.snapshotReads(), 3);
+});
 
 test('successful Recommended vote re-sorts once on focus exit without polling or replacing the focused button', async () => {
   const ui = await fixture();
