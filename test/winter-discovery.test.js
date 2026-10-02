@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConfig, loadDetection } from '../src/config/index.js';
 import { classify } from '../src/domain/classify.js';
+import { normalizedName } from '../src/domain/name-mirrors.js';
 import { combinedDiscovery } from '../src/services/combined-discovery.js';
 import { steamDiscovery } from '../src/services/discovery.js';
 import { Monitor } from '../src/services/monitor.js';
@@ -551,3 +552,99 @@ for (const offset of [-1, 0, 1]) {
     }
   });
 }
+
+for (const maxServers of [1000, 2]) {
+  test(`same-name winter probe replaces a stale live member before A2S admission at MAX_SERVERS=${maxServers}`, async () => {
+    const existing = convergingWinter(5, 2).map(row => ({ ...row, name: 'Winter Community' }));
+    const newcomer = { ...convergingWinter(7, 1)[0], name: 'Winter Community' };
+    const { monitor, rotate, advance, persisted } = fixture(existing, { maxServers, query: communityQuery });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+    const lastSeenAt = monitor.now(); advance(monitor.config.staleAfter + 1);
+    rotate([...existing, newcomer]); await monitor.run('discovery');
+    assert.deepEqual([...monitor.servers.keys()], [existing[1].id, newcomer.id]);
+    assert.equal(monitor.servers.get(existing[1].id).lastSeenAt, lastSeenAt);
+    assert.equal(monitor.servers.get(existing[1].id).discoveredAt, monitor.now());
+    assert.equal(monitor.servers.get(newcomer.id).classification.confidence, 'none');
+    assert.equal(monitor.servers.get(newcomer.id).lastSeenAt, null);
+    assert.equal([...monitor.servers.values()].filter(row => normalizedName(row.name) === 'winter community').length, 2);
+    assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
+    assert.equal(monitor.state.discoveryPartial, false);
+    const queried = [];
+    monitor.query = async row => { queried.push(row.id); return communityQuery(row); };
+    await monitor.run('live', [newcomer.id]);
+    assert.deepEqual(queried, [newcomer.id]);
+    assert.equal(monitor.servers.get(newcomer.id).classification.confidence, 'probable');
+    assert.equal(winterProtected(monitor).length, 2);
+    assert.equal(monitor.snapshot().servers.find(row => row.id === newcomer.id).stale, false);
+    assert.equal(persisted().servers.length, 2);
+  });
+}
+
+test('a winter probe with a different Steam name can replace stale winter-only protection at full global capacity', async () => {
+  const existing = convergingWinter(5, 2).map(row => ({ ...row, name: 'Winter Community' }));
+  const newcomer = convergingWinter(7, 1)[0];
+  const { monitor, rotate, advance } = fixture(existing, { maxServers: 2, query: communityQuery });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  advance(monitor.config.staleAfter + 1); rotate([newcomer]); await monitor.run('discovery');
+  assert.deepEqual([...monitor.servers.keys()], [existing[1].id, newcomer.id]);
+  assert.equal(monitor.servers.get(newcomer.id).classification.confidence, 'none');
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 1, candidatesDropped: 0 });
+  assert.equal(monitor.state.discoveryPartial, false);
+  await monitor.run('live', [newcomer.id]);
+  assert.equal(winterProtected(monitor).length, 2); assert.equal(monitor.servers.size, 2);
+  assert.ok([...monitor.servers.values()].every(row => normalizedName(row.name) === 'winter community'));
+});
+
+for (const [name, maxServers] of [['Winter Community', 1000], ['Winter Community', 2], ['Winter Elsewhere', 2]]) {
+  test(`fresh incumbents are not replaced by ${name} probes at MAX_SERVERS=${maxServers}`, async () => {
+    const existing = convergingWinter(5, 2).map(row => ({ ...row, name: 'Winter Community' }));
+    const newcomer = { ...convergingWinter(7, 1)[0], name };
+    const { monitor, rotate, advance } = fixture(existing, { maxServers, query: communityQuery });
+    await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+    const lastSeenAt = monitor.now(); advance(monitor.config.staleAfter);
+    monitor.query = async () => { throw Error('transient timeout'); };
+    for (let cycle = 0; cycle < 3; cycle++) {
+      rotate([...existing, newcomer]); await monitor.run('discovery');
+      assert.deepEqual([...monitor.servers.keys()], existing.map(row => row.id));
+      assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
+      await monitor.run('live');
+      assert.ok([...monitor.servers.values()].every(row => row.lastSeenAt === lastSeenAt));
+      assert.equal(winterProtected(monitor).length, 2);
+    }
+  });
+}
+
+test('stale curated and independently classified members cannot be replaced by winter probes', async () => {
+  const exempt = exemptWinterCandidates();
+  const existing = [exempt[0], exempt[1], exempt[4]].map(row => ({ ...row, name: 'Winter Community' }));
+  const newcomer = { ...convergingWinter(10, 1)[0], name: 'Winter Community' };
+  const { monitor, rotate, advance } = fixture(existing, { maxServers: 3, include: [existing[0]],
+    query: async row => ({ ...await communityQuery(row), map: row.map }) });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  const protectedIds = [...monitor.servers.keys()];
+  assert.equal(monitor.servers.get(existing[0].id).classification.confidence, 'curated');
+  assert.equal(monitor.servers.get(existing[1].id).classification.confidence, 'high');
+  assert.equal(monitor.servers.get(existing[2].id).classification.confidence, 'probable');
+  advance(monitor.config.staleAfter + 1);
+  for (const name of ['Winter Community', 'Winter Elsewhere']) {
+    rotate([{ ...newcomer, name }]); await monitor.run('discovery');
+    assert.deepEqual([...monitor.servers.keys()], protectedIds);
+    assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+  }
+});
+
+test('a full 128-entry pending pool rejects a winter probe without applying planned stale replacements', async () => {
+  const existing = convergingWinter(5, 2).map(row => ({ ...row, name: 'Winter Community' }));
+  const newcomer = { ...convergingWinter(200, 1)[0], name: 'Winter Community' };
+  const { monitor, rotate, advance } = fixture(existing, { query: communityQuery });
+  await monitor.init(); await monitor.run('discovery'); await monitor.run('live');
+  rotate(convergingWinter(20, 128)); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 130);
+  advance(monitor.config.staleAfter + 1);
+  const prior = new Map(monitor.servers);
+  rotate([newcomer]); await monitor.run('discovery');
+  assert.deepEqual(monitor.servers, prior); assert.equal(winterProtected(monitor).length, 2);
+  assert.equal([...monitor.servers.values()].filter(row => row.classification.confidence === 'none').length, 128);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
+  assert.equal(monitor.state.discoveryPartial, true);
+});

@@ -118,13 +118,32 @@ export class Monitor {
       if (!previous && raw.candidateOnly === true) Object.assign(theme, { classification: classify({}, this.rules), themeMisses: 0 });
       else { this.servers.delete(address.id); return; }
     }
-    // Bound new winter-only mirrors across discovery cycles and live promotion.
-    // Existing, independently relevant and operator-included rows bypass admission caps.
+    const replacements = new Set();
+    // Plan replacements without discarding data until every admission gate passes.
+    // Only stale winter-only live evidence may give way to a new targeted probe.
     if (!previous && !curated && theme.classification.confidence === 'none' && discoverySources?.includes('name:winter')) {
+      const included = new Set(this.rules.include.map(row => row.id));
+      const observedAt = this.now();
+      const staleWinter = [...this.servers.values()].filter(row => !row.curated && !included.has(row.id) &&
+        row.classification.confidence === 'probable' && row.lastSeenAt != null &&
+        observedAt - row.lastSeenAt > this.config.staleAfter &&
+        row.classification.signals?.some(signal => signal.kind === 'live-verified-winter-name') &&
+        classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription }, this.rules).confidence === 'none')
+        .sort((a, b) => a.lastSeenAt - b.lastSeenAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const name = normalizedName(raw.name);
-      if ([...this.servers.values()].filter(row => normalizedName(row.name) === name).length >= WINTER_NAME_LIMIT) return;
+      const sameNameCount = [...this.servers.values()].filter(row => normalizedName(row.name) === name).length;
+      if (sameNameCount >= WINTER_NAME_LIMIT) {
+        const needed = sameNameCount - WINTER_NAME_LIMIT + 1;
+        const matching = staleWinter.filter(row => normalizedName(row.name) === name).slice(0, needed);
+        if (matching.length < needed) return;
+        for (const row of matching) replacements.add(row.id);
+      }
+      if (this.servers.size - replacements.size === this.config.maxServers) {
+        const victim = staleWinter.find(row => !replacements.has(row.id));
+        if (victim) replacements.add(victim.id);
+      }
     }
-    if (!previous && !curated && this.servers.size >= this.config.maxServers) {
+    if (!previous && !curated && this.servers.size - replacements.size >= this.config.maxServers) {
       // Relevant arrivals may displace never-verified pending discovery rows from
       // earlier cycles. Includes, classified rows and all last-good live data stay.
       const included = new Set(this.rules.include.map(row => row.id));
@@ -137,13 +156,14 @@ export class Monitor {
             (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0] : null;
       // Do not discard data if curated overflow prevents one eviction from making room.
       if (!pending) { this.state.discoveryPartial = true; return; }
-      this.servers.delete(pending.id);
+      replacements.add(pending.id);
     }
     // Targeted samples and compatible legacy snapshots share one bounded pending pool.
     if (!previous && !curated && raw.candidateOnly === true && theme.classification.confidence === 'none' &&
       [...this.servers.values()].filter(row => row.classification.confidence === 'none').length >= 128) {
       this.state.discoveryPartial = true; return;
     }
+    for (const id of replacements) this.servers.delete(id);
     // Discovery metadata must not overwrite a trustworthy live response.
     this.servers.set(address.id, { ...metadata(raw), ...address, status: 'unknown', misses: 0,
       lastSeenAt: null, lastQueryAt: null, ...previous, ...this.geoip(address.ip), discoveryTags, discoveryDescription, discoverySources, ...theme,
