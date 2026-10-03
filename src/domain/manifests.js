@@ -36,8 +36,9 @@ function manifestGroups(rows) {
   const groups = new Map();
   for (const row of rows) {
     if (row.stale || row.status !== 'online' || row.misses || !row.liveManifestFingerprint) continue;
-    const ips = groups.get(row.liveManifestFingerprint) ?? new Set();
-    ips.add(row.ip); groups.set(row.liveManifestFingerprint, ips);
+    const group = groups.get(row.liveManifestFingerprint) ?? { ips: new Set(), identities: new Set() };
+    group.ips.add(row.ip); group.identities.add(row.a2sFingerprint || null);
+    groups.set(row.liveManifestFingerprint, group);
   }
   return groups;
 }
@@ -48,16 +49,21 @@ export function establishManifests(rows, observedIds, now, staleAfter) {
   const groups = manifestGroups(fresh);
   // Evaluate the completed batch, so query order cannot establish an initial cluster.
   for (const row of fresh) {
-    if (observedIds.has(row.id) && groups.get(row.liveManifestFingerprint)?.size < 3)
+    if (observedIds.has(row.id) && groups.get(row.liveManifestFingerprint)?.ips.size < 3)
       row.establishedManifestFingerprint = row.liveManifestFingerprint;
   }
 }
 
 export function filterMirroredManifests(rows) {
   const groups = manifestGroups(rows);
-  // Preserve prior independent evidence and operator includes, not a chosen representative.
-  return rows.filter(row => row.curated ||
-    (row.liveManifestFingerprint && row.establishedManifestFingerprint === row.liveManifestFingerprint) ||
-    !(groups.get(row.liveManifestFingerprint)?.size >= 3))
+  // A whole cluster with one complete identity is aliases, not independent manifest repetition.
+  // Missing/mixed identities retain the existing distinct-IP policy and establishment rules.
+  return rows.filter(row => {
+    const group = groups.get(row.liveManifestFingerprint);
+    const sharedIdentity = group?.identities.size === 1 && !group.identities.has(null);
+    return row.curated ||
+      (row.liveManifestFingerprint && row.establishedManifestFingerprint === row.liveManifestFingerprint) ||
+      sharedIdentity || !(group?.ips.size >= 3);
+  })
     .map(({ liveManifestFingerprint, establishedManifestFingerprint, curated, ...row }) => row);
 }

@@ -89,6 +89,9 @@ test('representative prefers an available endpoint and hidden clones do not occu
     if (row.id === third) return info(32);
     return info(4, { raw: { steamid: row.id === unique ? '90123456789012346' : '90123456789012347' } });
   });
+  monitor.add({ ...discovery(full), discoverySources: ['map:de_xmas'] });
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(full).classification.score, monitor.servers.get(available).classification.score + 1);
   const rows = monitor.snapshot().servers;
   assert.equal(rows.length, 3);
   const representative = rows.find(row => row.duplicateCount === 2);
@@ -205,6 +208,7 @@ test('three identical fresh manifests with shared identity retain one representa
   assert.ok(monitored.every(row => !row.establishedManifestFingerprint));
   const snapshot = monitor.snapshot();
   assert.equal(snapshot.servers.length, 1);
+  assert.equal(snapshot.servers[0].id, [...ids].sort()[0]);
   assert.equal(snapshot.servers[0].duplicateCount, 2);
   assert.deepEqual([snapshot.servers[0].id, ...snapshot.servers[0].duplicateEndpoints].sort(), [...ids].sort());
   assert.equal(snapshot.meta.coverage.visibility.manifestSuppressed, 0);
@@ -220,6 +224,17 @@ test('three identical fresh manifests without usable identity remain suppressed'
   assert.ok([...monitor.servers.values()].every(row => !row.a2sFingerprint && row.liveManifestFingerprint));
   assert.equal(monitor.snapshot().servers.length, 0);
   assert.equal(monitor.snapshot().meta.coverage.visibility.manifestSuppressed, 3);
+});
+
+test('a shared subset does not exempt a manifest cluster with mixed or missing identities', async () => {
+  const ids = endpoints.slice(0, 3);
+  for (const steamid of ['90123456789012346', undefined]) {
+    const monitor = await fixture(ids, row => row.id === ids[2] ? info(12, { raw: { steamid } }) : info());
+    assert.equal(monitor.servers.get(ids[0]).a2sFingerprint, monitor.servers.get(ids[1]).a2sFingerprint);
+    assert.notEqual(monitor.servers.get(ids[0]).a2sFingerprint, monitor.servers.get(ids[2]).a2sFingerprint);
+    assert.equal(monitor.snapshot().servers.length, 0);
+    assert.ok([...monitor.servers.values()].every(row => !row.establishedManifestFingerprint));
+  }
 });
 
 test('two identical manifests are insufficient and multiple ports do not count as distinct IPs', async () => {
