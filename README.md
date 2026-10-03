@@ -53,7 +53,7 @@ Open http://127.0.0.1:3001. `npm run dev` watches the server. `npm test` uses No
 
 API: `GET /api/servers`, `GET /api/player-history`, `GET /api/health`, `GET /api/ready`. Optional token-protected `POST /api/admin/refresh` accepts no body and has a one-minute cooldown. No public querying or scan endpoint.
 
-[Architecture](docs/ARCHITECTURE.md) · [Configuration](docs/CONFIGURATION.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+[Product](PRODUCT.md) · [Roadmap](ROADMAP.md) · [Project audit](docs/PROJECT_AUDIT.md) · [Architecture](docs/ARCHITECTURE.md) · [Configuration](docs/CONFIGURATION.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## MVP limits
 
