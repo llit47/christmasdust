@@ -81,7 +81,7 @@ test('similar names and populations remain separate without matching strong A2S 
   assert.ok(monitor.snapshot().servers.every(row => row.duplicateCount === 0));
 });
 
-test('representative uses existing recommended ranking and hidden clones do not occupy result slots', async () => {
+test('representative prefers an available endpoint and hidden clones do not occupy result slots', async () => {
   const [full, available, third, unique, another] = endpoints;
   const monitor = await fixture([full, available, third, unique, another], row => {
     if (row.id === full) return info(32);
@@ -89,6 +89,9 @@ test('representative uses existing recommended ranking and hidden clones do not 
     if (row.id === third) return info(32);
     return info(4, { raw: { steamid: row.id === unique ? '90123456789012346' : '90123456789012347' } });
   });
+  monitor.add({ ...discovery(full), discoverySources: ['map:de_xmas'] });
+  await monitor.run('live');
+  assert.equal(monitor.servers.get(full).classification.score, monitor.servers.get(available).classification.score + 1);
   const rows = monitor.snapshot().servers;
   assert.equal(rows.length, 3);
   const representative = rows.find(row => row.duplicateCount === 2);
@@ -98,6 +101,39 @@ test('representative uses existing recommended ranking and hidden clones do not 
   assert.equal(firstPage.length, 2);
   assert.equal(new Set(firstPage.map(row => row.id)).size, 2);
   assert.equal(firstPage.filter(row => [full, available, third].includes(row.id)).length, 1);
+});
+
+test('a fresh responding alias stays visible after the higher-relevance representative fails', async () => {
+  const [preferred, healthy] = endpoints;
+  const monitor = await fixture([preferred, healthy], () => info());
+  monitor.add({ ...discovery(preferred), discoverySources: ['map:de_xmas'] });
+  await monitor.run('live');
+  assert.equal(monitor.snapshot().servers[0].id, preferred);
+  const score = id => monitor.servers.get(id).classification.score;
+  assert.equal(score(preferred), score(healthy) + 1);
+  monitor.query = row => {
+    if (row.id === preferred) throw Error('timeout');
+    return info();
+  };
+  await monitor.run('live');
+  const failed = monitor.servers.get(preferred);
+  assert.equal(failed.status, 'uncertain');
+  assert.equal(failed.a2sFingerprint, monitor.servers.get(healthy).a2sFingerprint);
+  assert.ok(failed.a2sFingerprint);
+  assert.equal(score(preferred), score(healthy) + 1);
+  const rows = monitor.snapshot().servers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, healthy);
+  assert.equal(rows[0].status, 'online');
+  assert.equal(rows[0].stale, false);
+  assert.equal(rows[0].stability, 'responding');
+  assert.equal(rows[0].duplicateCount, 1);
+  assert.deepEqual(rows[0].duplicateEndpoints, [preferred]);
+  const filters = { search: '', country: '', map: '', confidence: '', slots: false,
+    favorites: true, hideEmpty: false };
+  assert.deepEqual(filterServers(rows, filters, new Set([preferred])), rows);
+  // The visitor recommendation comparator still puts relevance before health.
+  assert.equal(rankServers([failed, monitor.servers.get(healthy)])[0].id, preferred);
 });
 
 test('cached API exposes duplicate counts and endpoint IDs, never internal fingerprints', async t => {
@@ -159,6 +195,46 @@ test('three identical fresh manifests hide every member despite distinct identit
   assert.equal(monitor.snapshot().servers.length, 3);
   assert.equal(monitor.snapshot().servers.reduce((sum, row) => sum + row.players, 0), 35);
   assert.equal(persisted.servers.length, 3);
+});
+
+test('three identical fresh manifests with shared identity retain one representative without prior establishment', async () => {
+  const ids = endpoints.slice(0, 3);
+  const monitor = await fixture(ids, () => info());
+  const monitored = [...monitor.servers.values()];
+  assert.equal(new Set(monitored.map(row => row.ip)).size, 3);
+  assert.ok(monitored.every(row => row.a2sFingerprint && row.liveManifestFingerprint));
+  assert.equal(new Set(monitored.map(row => row.a2sFingerprint)).size, 1);
+  assert.equal(new Set(monitored.map(row => row.liveManifestFingerprint)).size, 1);
+  assert.ok(monitored.every(row => !row.establishedManifestFingerprint));
+  const snapshot = monitor.snapshot();
+  assert.equal(snapshot.servers.length, 1);
+  assert.equal(snapshot.servers[0].id, [...ids].sort()[0]);
+  assert.equal(snapshot.servers[0].duplicateCount, 2);
+  assert.deepEqual([snapshot.servers[0].id, ...snapshot.servers[0].duplicateEndpoints].sort(), [...ids].sort());
+  assert.equal(snapshot.meta.coverage.visibility.manifestSuppressed, 0);
+  assert.equal(snapshot.meta.coverage.visibility.duplicateAliases, 2);
+  // Identity exemption is not lasting independent-manifest protection.
+  monitor.query = row => distinctInfo(row);
+  await monitor.run('live');
+  assert.equal(monitor.snapshot().servers.length, 0);
+});
+
+test('three identical fresh manifests without usable identity remain suppressed', async () => {
+  const monitor = await fixture(endpoints.slice(0, 3), () => info(12, { raw: { steamid: undefined } }));
+  assert.ok([...monitor.servers.values()].every(row => !row.a2sFingerprint && row.liveManifestFingerprint));
+  assert.equal(monitor.snapshot().servers.length, 0);
+  assert.equal(monitor.snapshot().meta.coverage.visibility.manifestSuppressed, 3);
+});
+
+test('a shared subset does not exempt a manifest cluster with mixed or missing identities', async () => {
+  const ids = endpoints.slice(0, 3);
+  for (const steamid of ['90123456789012346', undefined]) {
+    const monitor = await fixture(ids, row => row.id === ids[2] ? info(12, { raw: { steamid } }) : info());
+    assert.equal(monitor.servers.get(ids[0]).a2sFingerprint, monitor.servers.get(ids[1]).a2sFingerprint);
+    assert.notEqual(monitor.servers.get(ids[0]).a2sFingerprint, monitor.servers.get(ids[2]).a2sFingerprint);
+    assert.equal(monitor.snapshot().servers.length, 0);
+    assert.ok([...monitor.servers.values()].every(row => !row.establishedManifestFingerprint));
+  }
 });
 
 test('two identical manifests are insufficient and multiple ports do not count as distinct IPs', async () => {

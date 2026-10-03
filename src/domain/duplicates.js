@@ -1,4 +1,3 @@
-import { rankServers } from '../../public/js/ranking.js';
 import { cleanText } from './server.js';
 
 const normalized = value => cleanText(value).normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -30,6 +29,15 @@ export function a2sFingerprint(raw) {
     typeof raw.password === 'boolean' ? raw.password : null]);
 }
 
+const responding = row => row.status === 'online' && !row.stale && !row.misses;
+const available = row => responding(row) && row.players < row.maxPlayers && !row.password;
+const relevance = row => ({ high: 3, curated: 2, probable: 1 })[row.classification?.confidence] || 0;
+// Endpoint usability comes before seasonal detail; visitor ranking and ratings are separate.
+const compareRepresentatives = (a, b) => Number(responding(b)) - Number(responding(a)) ||
+  Number(available(b)) - Number(available(a)) || relevance(b) - relevance(a) ||
+  (b.classification?.score || 0) - (a.classification?.score || 0) || b.players - a.players ||
+  (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 export function groupDuplicates(rows) {
   const groups = new Map();
   for (const row of rows) {
@@ -40,8 +48,7 @@ export function groupDuplicates(rows) {
   }
   const visible = [];
   for (const group of groups.values()) {
-    // Public ratings must not influence the backend endpoint representative.
-    const chosen = rankServers(group, { includeRatings: false })[0];
+    const chosen = group.reduce((best, row) => compareRepresentatives(row, best) < 0 ? row : best);
     const { a2sFingerprint, ...publicRow } = chosen;
     visible.push({ ...publicRow, duplicateCount: group.length - 1,
       duplicateEndpoints: group.filter(row => row.id !== chosen.id).map(row => row.id).sort() });
