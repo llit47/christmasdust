@@ -1,6 +1,6 @@
 import { cleanText } from './server.js';
 
-const normalizedName = value => cleanText(value).normalize('NFKC').toLowerCase()
+export const normalizedName = value => cleanText(value).normalize('NFKC').toLowerCase()
   .replace(/\p{Cf}/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const latency = row => Number.isFinite(row.backendQueryMs) && row.backendQueryMs >= 0 ? row.backendQueryMs : Infinity;
 const compare = (a, b) => (a.misses ?? 0) - (b.misses ?? 0) || latency(a) - latency(b) ||
