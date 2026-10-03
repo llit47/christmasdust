@@ -139,15 +139,6 @@ button,.button,select {
 .browser {
   padding-bottom:24px;
 }
-.browser-heading {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-}
-.browser-heading .eyebrow {
-  margin:0 0 2px;
-}
 h2 {
   font-size:24px;
   letter-spacing:-.6px;
@@ -162,7 +153,7 @@ h2 {
 }
 .filters {
   display:grid;
-  grid-template-columns:minmax(180px,240px) repeat(4,minmax(0,1fr));
+  grid-template-columns:minmax(180px,240px) repeat(4,minmax(0,1fr)) auto;
   gap:10px;
   background:#13232bb3;
   padding:14px;
@@ -177,6 +168,10 @@ h2 {
   font-size:11px;
   font-weight:600;
   color:var(--muted);
+}
+.filters>#locate {
+  align-self:start;
+  margin-top:20px;
 }
 input[type=search],select {
   width:100%;
@@ -552,19 +547,8 @@ dialog input {
   .intro {
     font-size:14px;
   }
-  .browser-heading {
-    align-items:center;
-    gap:8px;
-  }
-  .browser-heading .eyebrow {
-    font-size:9px;
-    letter-spacing:1px;
-  }
-  .browser-heading h2 {
-    font-size:18px;
-  }
-  .browser-heading .button {
-    flex-shrink:0;
+  .filters>#locate {
+    margin-top:0;
     min-height:36px;
     padding:7px 9px;
     font-size:11px;

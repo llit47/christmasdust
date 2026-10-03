@@ -13,8 +13,7 @@
   <header class="masthead"><a class="brand" href="/">✳ <span>Winter<span class="accent">Dust</span></span></a><span class="edition">COUNTER-STRIKE 1.6 <span> / </span> WINTER EDITION</span></header>
   <main>
     <section class="hero"><div><p class="eyebrow">OLD MAPS. WARM MEMORIES. ONE MORE ROUND.</p><h1>A little snow.<br>A lot of <em>Counter-Strike.</em></h1><p class="intro">Find a Christmas server, bring your friends, and make yourself at home.</p></div><div class="winter-art" aria-hidden="true"><div class="moon"></div><div class="tree tree-one"></div><div class="tree tree-two"></div><span class="art-label">de_dust, but make it December.</span></div></section>
-    <section class="browser" aria-labelledby="browser-title">
-      <div class="browser-heading"><div><p class="eyebrow">YOUR NEXT ROUND STARTS HERE</p><h2 id="browser-title">Winter server browser</h2></div><button id="locate" class="button" type="button">◎ Use my location</button></div>
+    <section class="browser" aria-label="Winter server browser">
       <p id="location-status" class="muted">Servers in your country rank higher when known. Precise location is optional and stays in your browser.</p>
       <form id="filters" class="filters" role="search">
         <label class="search">Search servers<input id="search" type="search" placeholder="Server name, map or IP…" maxlength="200"></label>
@@ -22,6 +21,7 @@
         <label>Map<select id="map"><option value="">All maps</option></select></label>
         <label>Christmas confidence<select id="confidence"><option value="">All matches</option><option value="high">High confidence</option><option value="probable">Probable winter</option><option value="curated">Curated</option></select></label>
         <label>Sort by<select id="sort"><option value="recommended">Recommended</option><option value="players">Most players</option><option value="proximity">Nearest (use location)</option></select></label>
+        <button id="locate" class="button" type="button">◎ Use my location</button>
         <div class="toggles"><label><input type="checkbox" id="slots"> Open slots only</label><label><input type="checkbox" id="hide-empty"> Hide empty servers</label><label><input type="checkbox" id="favorites"> ★ Favorites</label></div>
       </form>
       <div class="list-heading"><span id="count">Finding your next server…</span><span id="last-update">Updated — · refreshes every 30s</span></div>
