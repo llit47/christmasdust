@@ -124,14 +124,16 @@ export class Monitor {
     if (!previous && !curated && theme.classification.confidence === 'none' && discoverySources?.includes('name:winter')) {
       const included = new Set(this.rules.include.map(row => row.id));
       const observedAt = this.now();
-      const staleWinter = [...this.servers.values()].filter(row => !row.curated && !included.has(row.id) &&
-        row.classification.confidence === 'probable' && row.lastSeenAt != null &&
-        observedAt - row.lastSeenAt > this.config.staleAfter &&
-        row.classification.signals?.some(signal => signal.kind === 'live-verified-winter-name') &&
-        classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription }, this.rules).confidence === 'none')
+      const winterQuota = [...this.servers.values()].filter(row => !row.curated && !included.has(row.id) &&
+        ((row.classification.confidence === 'none' && row.discoverySources?.includes('name:winter')) ||
+          (row.classification.confidence === 'probable' &&
+            row.classification.signals?.some(signal => signal.kind === 'live-verified-winter-name'))) &&
+        classify({ ...row, tags: row.discoveryTags, description: row.discoveryDescription }, this.rules).confidence === 'none');
+      const staleWinter = winterQuota.filter(row => row.classification.confidence === 'probable' && row.lastSeenAt != null &&
+        observedAt - row.lastSeenAt > this.config.staleAfter)
         .sort((a, b) => a.lastSeenAt - b.lastSeenAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
       const name = normalizedName(raw.name);
-      const sameNameCount = [...this.servers.values()].filter(row => normalizedName(row.name) === name).length;
+      const sameNameCount = winterQuota.filter(row => normalizedName(row.name) === name).length;
       if (sameNameCount >= WINTER_NAME_LIMIT) {
         const needed = sameNameCount - WINTER_NAME_LIMIT + 1;
         const matching = staleWinter.filter(row => normalizedName(row.name) === name).slice(0, needed);

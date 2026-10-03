@@ -110,7 +110,7 @@ test('winter cap exempts independent Christmas/XMAS, known-map and operator incl
   await monitor.init(); await monitor.run('discovery');
   for (const candidate of same.slice(2)) assert.ok(monitor.servers.has(candidate.id));
   assert.equal(monitor.servers.get(same[5].id).classification.confidence, 'curated');
-  // Preexisting unclassified rows are kept even when other members now exhaust the cap.
+  // Preexisting unclassified rows stay alongside exempt members across refreshes.
   for (const candidate of same.slice(0, 2)) monitor.servers.set(candidate.id, { ...candidate,
     classification: classify(candidate, rules), discoveredAt: monitor.now() });
   await monitor.run('discovery');
@@ -647,4 +647,51 @@ test('a full 128-entry pending pool rejects a winter probe without applying plan
   assert.equal([...monitor.servers.values()].filter(row => row.classification.confidence === 'none').length, 128);
   assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 1, candidatesRetained: 0, candidatesDropped: 1 });
   assert.equal(monitor.state.discoveryPartial, true);
+});
+
+for (const exemptions of ['curated', 'curated/Christmas', 'XMAS/strong map', 'probable maps']) {
+  test(`two same-name ${exemptions} rows leave room for two winter-only probes`, async () => {
+    const exempt = convergingWinter(5, 2).map(row => ({ ...row, name: 'Winter Community' }));
+    let include = [];
+    if (exemptions === 'curated') include = exempt;
+    else if (exemptions === 'curated/Christmas') { include = [exempt[0]]; exempt[1].tags = 'christmas'; }
+    else if (exemptions === 'XMAS/strong map') { exempt[0].description = 'xmas'; exempt[1].map = 'de_christmas'; }
+    else { exempt[0].map = 'cs_alpin'; exempt[1].map = 'de_dust2_winter'; }
+    const probes = convergingWinter(10, 3).map((row, index) => ({ ...row,
+      name: ['winter-community', 'ＷＩＮＴＥＲ　COMMUNITY', 'Winter Community'][index] }));
+    const { monitor, rotate } = fixture(exempt, { include, query: async row => ({
+      ...await communityQuery(row), map: row.map
+    }) });
+    await monitor.init(); await monitor.run('discovery');
+    assert.equal(monitor.servers.size, 2);
+    assert.ok(exempt.every(row => monitor.servers.get(row.id).classification.confidence !== 'none'));
+    assert.equal(winterProtected(monitor).length, 0);
+    const preserved = new Map(monitor.servers);
+    rotate(probes); await monitor.run('discovery');
+    assert.equal(monitor.servers.size, 4);
+    for (const row of exempt) assert.strictEqual(monitor.servers.get(row.id), preserved.get(row.id));
+    assert.ok(probes.slice(0, 2).every(row => monitor.servers.get(row.id)?.classification.confidence === 'none'));
+    assert.equal(monitor.servers.has(probes[2].id), false);
+    assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
+    assert.equal(monitor.state.discoveryPartial, false);
+    await monitor.run('live');
+    assert.equal(monitor.servers.size, 4); assert.equal(winterProtected(monitor).length, 2);
+    assert.ok(exempt.every(row => monitor.servers.has(row.id)));
+    assert.deepEqual(monitor.coverage.live, { queriedEndpoints: 4, queryFailures: 0, classificationNone: 0 });
+  });
+}
+
+test('unclassified snow/map pending rows do not consume the winter-name quota', async () => {
+  const existing = convergingWinter(5, 2).map((row, index) => ({ ...row, name: 'Winter Community',
+    discoverySources: [index === 0 ? 'name:snow' : 'map:de_dust2'] }));
+  const probes = convergingWinter(10, 3).map(row => ({ ...row, name: 'Winter Community' }));
+  const { monitor, rotate } = fixture(existing);
+  await monitor.init(); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 2);
+  rotate(probes); await monitor.run('discovery');
+  assert.equal(monitor.servers.size, 4);
+  assert.ok(existing.every(row => monitor.servers.has(row.id)));
+  assert.ok(probes.slice(0, 2).every(row => monitor.servers.has(row.id)));
+  assert.equal(monitor.servers.has(probes[2].id), false);
+  assert.deepEqual(monitor.coverage.discovery, { steamEndpoints: 3, candidatesRetained: 2, candidatesDropped: 1 });
 });
