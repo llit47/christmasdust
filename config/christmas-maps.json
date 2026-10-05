@@ -32,7 +32,9 @@
     "xmas_nipperhouse",
     "xmas_lodge",
     "merry_christmas",
-    "awp_india_christmast"
+    "awp_india_christmast",
+    "cs_xmas_italy",
+    "lethal_urbandust2_xmas"
   ],
   "probable": [
     "deathrun_jinglebells",
@@ -79,6 +81,11 @@
     "awp_india_snow",
     "cs_assault_1337_snow",
     "css_dust2winter_go",
-    "de_dust2_2x2_sks_win"
+    "de_dust2_2x2_sks_win",
+    "de_dust2_winter16",
+    "css_miragewinter_go",
+    "cs_mansion_snow",
+    "css_train_winter",
+    "de_nuke2x2_snow"
   ]
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Expand the vetted map catalog with two strong Xmas maps and five probable winter maps from the observed LEGION-CS rotation.
+
 ## 0.4.0
 
 - Persist seven days of measured five-minute player samples per endpoint in a separate built-in SQLite store, with safe native update paths and no additional game queries.
